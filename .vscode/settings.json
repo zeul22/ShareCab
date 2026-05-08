@@ -1,0 +1,26 @@
+{
+  // Dart/Flutter — this is a monorepo with the Flutter app in /app, so the
+  // analyzer needs a higher search depth to discover pubspec.yaml.
+  "dart.projectSearchDepth": 3,
+  "dart.lineLength": 100,
+  "dart.previewFlutterUiGuides": true,
+
+  // Format Dart on save with 100-char lines (matches `dart format` default
+  // in this repo's analysis_options.yaml).
+  "[dart]": {
+    "editor.defaultFormatter": "Dart-Code.dart-code",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "editor.rulers": [100]
+  },
+
+  // Hide build artifacts from the file tree.
+  "files.exclude": {
+    "**/.dart_tool": true,
+    "**/.flutter-plugins": true,
+    "**/.flutter-plugins-dependencies": true,
+    "**/build": true,
+    "**/.next": true,
+    "**/node_modules": true
+  }
+}

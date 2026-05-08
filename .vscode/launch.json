@@ -1,0 +1,69 @@
+{
+  // Flutter debug configurations for the ShareCab monorepo.
+  // The Flutter app lives in /app — cwd anchors the launcher there so
+  // `flutter run` finds pubspec.yaml correctly.
+  //
+  // The Google Maps key below is a *demo* key. Before making this repo public:
+  //   1. Restrict it in Google Cloud Console (Android pkg + SHA-1, iOS bundle ID).
+  //   2. Rotate it once the demo phase is over.
+  // The "custom Maps key" config prompts at launch if you ever need to override.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ShareCab App (debug)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "ShareCab App (profile)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "ShareCab App (release)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "ShareCab App (debug, custom Maps key)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=${input:googleMapsKey}"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "googleMapsKey",
+      "type": "promptString",
+      "description": "Google Maps Platform API key — overrides the bundled demo key.",
+      "default": ""
+    }
+  ]
+}
