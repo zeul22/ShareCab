@@ -131,4 +131,4 @@ function centroidOf(points) {
   return { lat: sum.lat / points.length, lng: sum.lng / points.length };
 }
 
-module.exports = { findMatchForTrip };
+module.exports = { findMatchForTrip, _internals: { centroidOf } };

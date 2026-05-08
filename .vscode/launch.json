@@ -6,11 +6,45 @@
   // The Google Maps key below is a *demo* key. Before making this repo public:
   //   1. Restrict it in Google Cloud Console (Android pkg + SHA-1, iOS bundle ID).
   //   2. Rotate it once the demo phase is over.
-  // The "custom Maps key" config prompts at launch if you ever need to override.
+  //
+  // Two-emulator workflow:
+  //   - Boot both an iOS Simulator and an Android emulator before launching.
+  //   - Pick "ShareCab App (iOS + Android)" to launch on both at once.
+  //   - Each debug session has its own Debug Console; hot-reload is per-session.
+  //
+  // Note on API base URLs:
+  //   - Android emulator → host machine: 10.0.2.2 (special alias)
+  //   - iOS simulator   → host machine: localhost
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "ShareCab App (debug)",
+      "name": "ShareCab App (iOS Simulator)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "iphone",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://localhost:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "ShareCab App (Android Emulator)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "android",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "ShareCab App (debug, pick device)",
       "type": "dart",
       "request": "launch",
       "cwd": "${workspaceFolder}/app",
@@ -56,6 +90,16 @@
         "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
         "--dart-define=GOOGLE_MAPS_KEY=${input:googleMapsKey}"
       ]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "ShareCab App (iOS + Android)",
+      "configurations": [
+        "ShareCab App (iOS Simulator)",
+        "ShareCab App (Android Emulator)"
+      ],
+      "stopAll": true
     }
   ],
   "inputs": [
