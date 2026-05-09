@@ -1,8 +1,25 @@
 const { z } = require('zod');
 const Unlock = require('../models/Unlock');
+const User = require('../models/User');
 const env = require('../config/env');
 const { HttpError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+
+// Rating tiers that drive how many rewarded ads a rider must complete to
+// earn an unlock. Punishes flaky / low-rated users with more friction
+// without locking them out, rewards reliable users with a fast path.
+//
+// Tiers (highest match wins):
+//   ≥ 4.5★ → 1 ad (fast path for top riders)
+//   ≥ 4.0★ → adsPerUnlock from env (current default, 2)
+//   < 4.0★ → adsPerUnlock + 1 (extra friction)
+function adsRequiredForRating(rating) {
+  const r = Number.isFinite(rating) ? rating : 5;
+  const base = env.unlock.adsPerUnlock;
+  if (r >= 4.5) return Math.max(1, base - 1);
+  if (r >= 4.0) return base;
+  return base + 1;
+}
 
 const adRewardSchema = z.object({
   riderId: z.string(),
@@ -18,13 +35,20 @@ async function createAdRewardUnlock(req, res, next) {
     // TODO(admob-ssv): replace stub with real AdMob Server-Side Verification.
     //   - Verify HMAC signature using AdMob's public key for the given key_id
     //   - Track per-rider rewarded-ad count via a separate collection, dedup on transaction_id
-    //   - Only mint an Unlock once env.unlock.adsPerUnlock reached
+    //   - Only mint an Unlock once the per-rating threshold is reached
     const data = adRewardSchema.parse(req.body);
 
-    if (data.adsCompleted < env.unlock.adsPerUnlock) {
+    // Look up the rider's rating to determine how many ads they actually
+    // need. A new account defaults to 5.0★ in the User schema so first-time
+    // riders get the top tier; ratings below 4.0 face stricter friction.
+    const rider = await User.findById(data.riderId, { rating: 1 });
+    if (!rider) throw new HttpError(404, 'Rider not found');
+    const required = adsRequiredForRating(rider.rating);
+
+    if (data.adsCompleted < required) {
       throw new HttpError(
         400,
-        `Need ${env.unlock.adsPerUnlock} rewarded ads to unlock matching, got ${data.adsCompleted}`,
+        `Need ${required} rewarded ads to unlock matching, got ${data.adsCompleted}`,
       );
     }
 
@@ -35,8 +59,11 @@ async function createAdRewardUnlock(req, res, next) {
       externalRef: data.externalRef,
       expiresAt,
     });
-    logger.info(`Unlock ${unlock._id} minted for rider ${data.riderId} via ad`);
-    res.status(201).json({ unlock });
+    logger.info(
+      `Unlock ${unlock._id} minted for rider ${data.riderId} (rating=${rider.rating}, ` +
+      `requiredAds=${required}) via ad`,
+    );
+    res.status(201).json({ unlock, requiredAds: required });
   } catch (err) {
     next(err);
   }

@@ -102,6 +102,13 @@ class MockRideApi implements RideApi {
     return ride;
   }
 
+  @override
+  Future<Ride?> getActiveRide() async {
+    // Mock keeps no cross-session state — there's never an active ride to resume.
+    await Future.delayed(_latency());
+    return _activeRide;
+  }
+
   /// Test/UI helper to force-complete the active ride (e.g. from the Live
   /// screen's "I've reached" affordance).
   Future<Ride> completeActiveRide() async {

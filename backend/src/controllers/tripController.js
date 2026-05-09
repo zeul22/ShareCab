@@ -4,6 +4,7 @@ const Driver = require('../models/Driver');
 const MatchGroup = require('../models/MatchGroup');
 const User = require('../models/User');
 const Unlock = require('../models/Unlock');
+const Message = require('../models/Message');
 const env = require('../config/env');
 const logger = require('../utils/logger');
 const { isWithinIndia } = require('../utils/geo');
@@ -11,7 +12,26 @@ const { HttpError } = require('../middleware/errorHandler');
 const { findMatchForTrip } = require('../services/matchingService');
 const { assignDriverForTrip, assignDriverForGroup } = require('../services/dispatchService');
 const { estimateSoloFare, estimateSharedFareForGroup } = require('../services/fareService');
-const { broadcastTripUpdate } = require('../services/notificationService');
+const {
+  broadcastTripUpdate,
+  broadcastChatReset,
+} = require('../services/notificationService');
+
+// Deep-populate spec: returns the trip with its driver, its match group, and
+// for each sibling trip in that group the rider's display name + their own
+// pickup/dropoff. This lets the app render real co-rider info on match
+// proposals instead of placeholders pointing at the current rider's locations.
+const TRIP_POPULATE = [
+  { path: 'driver' },
+  {
+    path: 'matchGroup',
+    populate: {
+      path: 'trips',
+      select: 'rider pickup dropoff status',
+      populate: { path: 'rider', select: 'name rating' },
+    },
+  },
+];
 
 const point = z
   .object({
@@ -53,6 +73,21 @@ async function estimate(req, res, next) {
 async function requestTrip(req, res, next) {
   try {
     const data = requestSchema.parse(req.body);
+
+    // One rider, one in-flight trip. Without this guard a rider can stack
+    // multiple `requested` trips by hitting the search button repeatedly,
+    // and the matching engine will pull all of them into the same group —
+    // which surfaces in the UI as phantom co-riders that don't exist.
+    const existing = await Trip.findOne({
+      rider: req.auth.userId,
+      status: { $in: ['requested', 'matched', 'driver_assigned', 'arriving', 'in_progress'] },
+    }, { _id: 1, status: 1 });
+    if (existing) {
+      throw new HttpError(
+        409,
+        `You already have an active trip (${existing.status}). Cancel it before starting a new one.`,
+      );
+    }
 
     // Gate: shareEnabled requires an unconsumed unlock (earned by watching ads
     // or via Razorpay payment). Atomically consume one in a single round-trip
@@ -123,7 +158,7 @@ async function requestTrip(req, res, next) {
       await assignDriverForTrip(trip);
     }
 
-    const refreshed = await Trip.findById(trip._id).populate('matchGroup driver');
+    const refreshed = await Trip.findById(trip._id).populate(TRIP_POPULATE);
     await broadcastTripUpdate(refreshed);
 
     res.status(201).json({ trip: refreshed });
@@ -143,12 +178,32 @@ function scheduleDeferredDispatch(tripId) {
       const group = await findMatchForTrip(trip._id);
       if (group) {
         await assignDriverForGroup(group);
+        const refreshed = await Trip.findById(tripId).populate(TRIP_POPULATE);
+        await broadcastTripUpdate(refreshed);
       } else {
-        await assignDriverForTrip(trip);
+        // Window elapsed without a co-rider — auto-cancel the trip so it
+        // stops showing up as a candidate for future rider searches. Without
+        // this, abandoned trips accumulate in `requested` state and get
+        // pulled into unrelated match groups (manifests as phantom riders
+        // in the UI). The rider's app sees this via its own polling
+        // watcher; the screen surfaces the empty-state UI off its own timer.
+        trip.status = 'cancelled';
+        trip.cancelledAt = new Date();
+        trip.cancelReason = 'search-window-expired';
+        await trip.save();
+        if (trip.matchGroup) {
+          const grp = await MatchGroup.findById(trip.matchGroup);
+          if (grp) {
+            grp.trips = grp.trips.filter(
+              (t) => t.toString() !== trip._id.toString(),
+            );
+            if (grp.trips.length === 0) grp.status = 'cancelled';
+            await grp.save();
+          }
+        }
+        logger.info(`Trip ${tripId}: search window expired without a match; auto-cancelled.`);
+        await broadcastTripUpdate(trip);
       }
-
-      const refreshed = await Trip.findById(tripId).populate('matchGroup driver');
-      await broadcastTripUpdate(refreshed);
     } catch (err) {
       logger.error(`Deferred dispatch failed for trip ${tripId}: ${err.message}`);
     }
@@ -157,7 +212,7 @@ function scheduleDeferredDispatch(tripId) {
 
 async function getTrip(req, res, next) {
   try {
-    const trip = await Trip.findById(req.params.id).populate('matchGroup driver');
+    const trip = await Trip.findById(req.params.id).populate(TRIP_POPULATE);
     if (!trip) throw new HttpError(404, 'Trip not found');
     if (
       trip.rider.toString() !== req.auth.userId &&
@@ -183,6 +238,29 @@ async function listMyTrips(req, res, next) {
   }
 }
 
+// Statuses that count as an "in-flight" trip for the rider — anything still
+// resolvable. Completed/cancelled trips are NOT considered active.
+const ACTIVE_TRIP_STATUSES = ['requested', 'matched', 'driver_assigned', 'arriving', 'in_progress'];
+
+async function getMyActiveTrip(req, res, next) {
+  try {
+    const trip = await Trip.findOne({
+      rider: req.auth.userId,
+      status: { $in: ACTIVE_TRIP_STATUSES },
+    })
+      .sort({ createdAt: -1 })
+      .populate(TRIP_POPULATE);
+    if (!trip) {
+      // 200 with null is friendlier than 404 — clients want to call this on
+      // every cold start; an explicit "no active trip" is a happy outcome.
+      return res.json({ trip: null });
+    }
+    res.json({ trip });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function cancelTrip(req, res, next) {
   try {
     const trip = await Trip.findById(req.params.id);
@@ -197,13 +275,40 @@ async function cancelTrip(req, res, next) {
     trip.cancelReason = req.body?.reason;
     await trip.save();
 
+    // 1. Pull this trip out of the assigned driver's activeTrips list.
+    //    Without this, a driver who completed the *other* sibling trips would
+    //    still appear "busy" because the cancelled trip lingers in the array.
+    if (trip.driver) {
+      await Driver.updateOne(
+        { _id: trip.driver },
+        { $pull: { activeTrips: trip._id } },
+      );
+    }
+
+    // 2. Update / dissolve the match group + wipe chat history (privacy:
+    //    a future joiner shouldn't see the leaver's conversation).
     if (trip.matchGroup) {
       const group = await MatchGroup.findById(trip.matchGroup);
       if (group) {
         group.trips = group.trips.filter((t) => t.toString() !== trip._id.toString());
-        if (group.trips.length === 0) group.status = 'cancelled';
+        if (group.trips.length === 0) {
+          // Last rider left — cancel the group and release the driver entirely.
+          group.status = 'cancelled';
+          if (group.driver) {
+            await Driver.updateOne(
+              { _id: group.driver },
+              { $set: { activeTrips: [] } },
+            );
+          }
+        }
         await group.save();
       }
+
+      // Composition changed → wipe the chat and tell remaining riders'
+      // clients to clear their local cache. Awaited so we don't ack the
+      // cancel before chat state is consistent.
+      await Message.deleteMany({ matchGroup: trip.matchGroup });
+      await broadcastChatReset(trip.matchGroup);
     }
 
     await broadcastTripUpdate(trip);
@@ -330,6 +435,7 @@ module.exports = {
   requestTrip,
   getTrip,
   listMyTrips,
+  getMyActiveTrip,
   cancelTrip,
   getGroupFare,
   arriveTrip,

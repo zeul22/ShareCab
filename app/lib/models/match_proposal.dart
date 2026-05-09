@@ -9,6 +9,11 @@ import 'vehicle.dart';
 /// shows "you" plus the others.
 class MatchProposal {
   final String id;
+
+  /// Backend MatchGroup id. Null for solo trips (no group). Used as the
+  /// route argument when opening the chat screen — see Routes.chat.
+  final String? groupId;
+
   final List<Passenger> coPassengers;
   final List<RouteStop> stops;
   final VehicleType vehicleType;
@@ -42,6 +47,7 @@ class MatchProposal {
     required this.durationMin,
     required this.luggageSeatsUsed,
     required this.luggageSeatsFree,
+    this.groupId,
   });
 
   int get riderCount => coPassengers.length + 1; // +1 for the current user

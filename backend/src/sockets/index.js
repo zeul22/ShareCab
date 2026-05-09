@@ -2,19 +2,24 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const Driver = require('../models/Driver');
+const MatchGroup = require('../models/MatchGroup');
 const notifications = require('../services/notificationService');
 const logger = require('../utils/logger');
 
 /**
  * Realtime channels:
- *   - user:{userId}    private channel for trip updates / notifications
- *   - driver:{userId}  private channel for incoming ride offers
- *   - trip:{tripId}    everyone subscribed to a trip (rider + driver + admin)
+ *   - user:{userId}     private channel for trip updates / notifications
+ *   - driver:{userId}   private channel for incoming ride offers
+ *   - trip:{tripId}     everyone subscribed to a trip (rider + driver + admin)
+ *   - group:{groupId}   chat room for the riders in a MatchGroup
  *
  * Events:
- *   - driver -> server:  'driver:location' { lat, lng }
- *   - server -> trip:    'trip:update'     { id, status, ... }
- *   - server -> trip:    'driver:location' { driverId, lat, lng }
+ *   - driver -> server:  'driver:location'  { lat, lng }
+ *   - client -> server:  'group:subscribe'  groupId  (membership-checked)
+ *   - server -> trip:    'trip:update'      { id, status, ... }
+ *   - server -> trip:    'driver:location'  { driverId, lat, lng }
+ *   - server -> group:   'chat:message'     { _id, sender, content, createdAt }
+ *   - server -> group:   'chat:reset'       { groupId }
  */
 function attachSocketServer(httpServer) {
   const io = new Server(httpServer, {
@@ -46,6 +51,30 @@ function attachSocketServer(httpServer) {
     });
     socket.on('trip:unsubscribe', (tripId) => {
       socket.leave(`trip:${tripId}`);
+    });
+
+    // Chat room for a MatchGroup. Membership-checked: a stranger
+    // sniffing groupIds can't subscribe to other riders' chats.
+    socket.on('group:subscribe', async (groupId) => {
+      try {
+        const group = await MatchGroup.findById(groupId).populate({
+          path: 'trips',
+          select: 'rider',
+        });
+        const isMember = group?.trips?.some(
+          (t) => t.rider && t.rider.toString() === userId,
+        );
+        if (!isMember) {
+          logger.debug(`group:subscribe rejected user=${userId} group=${groupId}`);
+          return;
+        }
+        socket.join(`group:${groupId}`);
+      } catch (err) {
+        logger.debug(`group:subscribe error: ${err.message}`);
+      }
+    });
+    socket.on('group:unsubscribe', (groupId) => {
+      socket.leave(`group:${groupId}`);
     });
 
     socket.on('driver:location', async ({ lat, lng, tripId }) => {

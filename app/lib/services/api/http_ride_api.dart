@@ -81,16 +81,19 @@ class HttpRideApi implements RideApi {
     // completed a Razorpay payment.
     await _mintAdUnlockForCurrentRider();
 
-    // Create the trip with shareEnabled=true.
+    // Create the trip and return the initial state immediately. The caller
+    // (RideFlowState / SearchingScreen) is responsible for polling via
+    // [getLiveRide] until either the proposal's riderCount goes >=2 (match
+    // found) or its 5-minute search window times out. Doing the polling
+    // upstream keeps cancellation natural and lets the screen drive a
+    // progress bar without a blocking RPC.
     final created = await _createTrip(search, shareEnabled: true);
     final tripId = created['_id'] as String;
     _sessionToTripId[sessionId] = tripId;
 
-    // Poll until the trip resolves — either matched into a group, or
-    // dispatched solo. Backend's deferred dispatch defaults to ~8s.
-    final resolved = await _pollUntilResolved(tripId);
-
-    final proposal = _buildProposalFromTrip(resolved, search);
+    // Always return one proposal — riderCount tells the caller whether it
+    // landed a match (>=2) or is still pending (==1).
+    final proposal = _buildProposalFromTrip(created, search);
     return [proposal];
   }
 
@@ -134,6 +137,15 @@ class HttpRideApi implements RideApi {
   Future<Ride> getLiveRide(String rideId) async {
     final trip = await _getTrip(rideId);
     return _buildRideFromTrip(trip);
+  }
+
+  @override
+  Future<Ride?> getActiveRide() async {
+    final res = await _get('/trips/mine/active', auth: true);
+    final body = _decode(res);
+    final trip = body['trip'];
+    if (trip == null) return null;
+    return _buildRideFromTrip(trip as Map<String, dynamic>);
   }
 
   @override
@@ -201,22 +213,6 @@ class HttpRideApi implements RideApi {
     });
   }
 
-  /// Poll GET /trips/:id every 1s until the trip is matched or solo-dispatched,
-  /// or until ~12s have passed (just over the backend's deferred-dispatch
-  /// window). Returns the resolved trip.
-  Future<Map<String, dynamic>> _pollUntilResolved(String tripId) async {
-    Map<String, dynamic> latest = await _getTrip(tripId);
-    final deadline = DateTime.now().add(const Duration(seconds: 12));
-    while (DateTime.now().isBefore(deadline)) {
-      final status = latest['status'] as String? ?? '';
-      // 'requested' = still waiting; anything else = resolved.
-      if (status != 'requested') return latest;
-      await Future.delayed(const Duration(seconds: 1));
-      latest = await _getTrip(tripId);
-    }
-    return latest;
-  }
-
   Future<http.Response> _post(String path, Map<String, dynamic> body, {bool auth = false}) async {
     final headers = await _headers(auth: auth);
     final res = await _client.post(
@@ -272,19 +268,33 @@ class HttpRideApi implements RideApi {
     final coPassengers = <Passenger>[];
 
     if (group != null) {
-      // Backend returns group with `trips` as ObjectId list — we don't have
-      // populated co-rider details here. For the demo we surface a placeholder
-      // co-rider. A follow-up could add a `populate('trips.rider')` server side
-      // and feed real names + drop-offs into the proposal.
-      final tripIds = (group['trips'] as List?) ?? const [];
-      final coRiderCount = tripIds.length - 1; // minus the current rider
-      for (var i = 0; i < coRiderCount; i++) {
+      // Backend deep-populates matchGroup.trips with each sibling's rider
+      // name + pickup/dropoff. Use those real values; only fall back to the
+      // current rider's search context if a sibling somehow comes back as
+      // a bare ObjectId (defensive — shouldn't happen with TRIP_POPULATE).
+      final siblingTrips = (group['trips'] as List?) ?? const [];
+      for (final raw in siblingTrips) {
+        if (raw is! Map<String, dynamic>) continue; // bare id; unexpected
+        final siblingId = raw['_id'] as String? ?? '';
+        if (siblingId == tripId) continue; // skip ourselves
+
+        // The rider field may be a populated user doc or a bare ObjectId
+        // string depending on backend selection. Both are handled.
+        String firstName = 'Co-rider';
+        double rating = 5.0;
+        final rider = raw['rider'];
+        if (rider is Map<String, dynamic>) {
+          final fullName = (rider['name'] as String? ?? '').trim();
+          if (fullName.isNotEmpty) firstName = fullName.split(' ').first;
+          rating = (rider['rating'] as num?)?.toDouble() ?? 5.0;
+        }
+
         coPassengers.add(Passenger(
-          id: 'co_$i',
-          firstName: 'Co-rider',
-          rating: 5.0,
-          pickup: search.pickup!,
-          dropoff: search.dropoff!,
+          id: siblingId.isNotEmpty ? siblingId : 'co_${coPassengers.length}',
+          firstName: firstName,
+          rating: rating,
+          pickup: _placeFromTripField(raw['pickup']) ?? search.pickup!,
+          dropoff: _placeFromTripField(raw['dropoff']) ?? search.dropoff!,
           luggage: LuggageProfile.empty,
         ));
       }
@@ -344,6 +354,7 @@ class HttpRideApi implements RideApi {
 
     return MatchProposal(
       id: tripId,
+      groupId: group?['_id'] as String?,
       coPassengers: coPassengers,
       stops: stops,
       vehicleType: vehicleType,
@@ -427,6 +438,21 @@ class HttpRideApi implements RideApi {
         color: v['color'] as String? ?? '',
       ),
     );
+  }
+
+  /// Convert a backend `trip.pickup` / `trip.dropoff` subdocument into a
+  /// [Place]. The backend stores location as GeoJSON `{type: 'Point',
+  /// coordinates: [lng, lat]}` and an optional `address` string — `Place.fromJson`
+  /// already handles that shape. Returns null if the field is missing or
+  /// malformed (we then fall back to the current rider's own search context
+  /// in the caller).
+  Place? _placeFromTripField(dynamic raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    try {
+      return Place.fromJson(raw);
+    } catch (_) {
+      return null;
+    }
   }
 
   VehicleType _vehicleTypeFromCapacity(num? capacity) {

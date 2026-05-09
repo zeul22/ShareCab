@@ -5,6 +5,9 @@ const ctrl = require('../controllers/tripController');
 router.post('/estimate', requireAuth, ctrl.estimate);
 router.post('/', requireAuth, ctrl.requestTrip);
 router.get('/mine', requireAuth, ctrl.listMyTrips);
+// /mine/active must be declared before /:id so Express doesn't treat "active"
+// as a trip id and 404 it.
+router.get('/mine/active', requireAuth, ctrl.getMyActiveTrip);
 router.get('/:id', requireAuth, ctrl.getTrip);
 router.post('/:id/cancel', requireAuth, ctrl.cancelTrip);
 router.get('/groups/:id/fare', requireAuth, ctrl.getGroupFare);

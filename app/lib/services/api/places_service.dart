@@ -59,6 +59,10 @@ class PlacesService {
 
   static const _autocompleteUrl = 'https://places.googleapis.com/v1/places:autocomplete';
   static const _detailsUrlBase = 'https://places.googleapis.com/v1/places/';
+  // The "new" Places API doesn't include reverse geocoding, so we use the
+  // legacy Geocoding API. Same key, different host. Requires the **Geocoding
+  // API** to be enabled on the GCP project that owns the key.
+  static const _geocodeUrl = 'https://maps.googleapis.com/maps/api/geocode/json';
 
   /// Field mask tells Google which fields to include in the response. Smaller
   /// masks = lower per-request cost.
@@ -151,6 +155,32 @@ class PlacesService {
       lat: (loc['latitude'] as num?)?.toDouble() ?? 0,
       lng: (loc['longitude'] as num?)?.toDouble() ?? 0,
     );
+  }
+
+  /// Reverse-geocode a coordinate into a human-readable formatted address.
+  /// Returns null if the API key isn't configured, the request fails, or
+  /// Google has no result for that point (e.g. middle of the ocean).
+  ///
+  /// Used by the map picker so dragging the pin shows a real address instead
+  /// of the literal placeholder string "Pinned location".
+  Future<String?> reverseGeocode(double lat, double lng) async {
+    if (!isConfigured) return null;
+    final uri = Uri.parse(_geocodeUrl).replace(queryParameters: {
+      'latlng': '$lat,$lng',
+      'key': apiKey,
+      // ShareCab is India-only; bias results to localised Indian addresses.
+      'region': 'in',
+      'language': 'en',
+    });
+
+    final res = await _client.get(uri);
+    if (res.statusCode != 200) return null;
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    if (body['status'] != 'OK') return null;
+    final results = body['results'] as List?;
+    if (results == null || results.isEmpty) return null;
+    return (results.first as Map<String, dynamic>)['formatted_address'] as String?;
   }
 
   void dispose() => _client.close();

@@ -51,9 +51,23 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ride = context.watch<RideFlowState>().activeRide;
+    final flow = context.watch<RideFlowState>();
+    final ride = flow.activeRide;
     if (ride == null) {
       return const Scaffold(body: Center(child: Text('No active ride.')));
+    }
+
+    // Polling watcher just told us the rider is now solo. Pop a dialog
+    // letting them either continue at the higher solo fare or bail out
+    // and search for another co-rider. Same flag/clear pattern as
+    // RideConfirmationScreen — clear before showing so a quick rebuild
+    // doesn't re-trigger.
+    if (flow.coRiderLostPending) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<RideFlowState>().clearCoRiderLost();
+        _showCoRiderLostDialog(ride.perRiderFare);
+      });
     }
 
     final points = ride.proposal.stops
@@ -92,6 +106,46 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
         ),
       ),
     );
+  }
+
+  /// Co-rider cancelled mid-ride. Decision is firmer here than on
+  /// RideConfirmationScreen because the driver is already en route /
+  /// driving — "wait for another" requires bailing out of the live ride
+  /// entirely, which is a bigger commitment.
+  Future<void> _showCoRiderLostDialog(double soloFare) async {
+    final waitForAnother = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Your co-rider cancelled'),
+        content: Text(
+          "You're the only rider now. Continue this ride solo at "
+          '₹${soloFare.toStringAsFixed(0)} (the full fare), or cancel and search '
+          'for a fresh co-rider? Cancelling now may incur a fee since the '
+          'driver is already on the way.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('Continue solo'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+            child: const Text('Cancel & re-search'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    final flow = context.read<RideFlowState>();
+    if (waitForAnother == true) {
+      await flow.searchForAnother();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed(Routes.searching);
+    } else {
+      flow.continueSolo();
+    }
   }
 
   Set<Marker> _markers(Ride ride) {
@@ -188,9 +242,51 @@ class _RideCard extends StatelessWidget {
               ),
             ],
           ),
+          // Cancel still available mid-ride. Disable once the ride is in
+          // an irreversible state (completed / cancelled).
+          if (ride.status != RideStatus.completed &&
+              ride.status != RideStatus.cancelled) ...[
+            const SizedBox(height: 4),
+            Center(
+              child: TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+                onPressed: () => _confirmCancel(context),
+                child: const Text('Cancel ride'),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Future<void> _confirmCancel(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Cancel ride?'),
+        content: const Text(
+          'Your driver and any co-riders will be notified. '
+          'Cancellation fees may apply once the driver is en route.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('Keep ride'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            child: const Text('Cancel ride'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    await context.read<RideFlowState>().cancelActiveRide();
+    if (!context.mounted) return;
+    Navigator.of(context).popUntil(ModalRoute.withName(Routes.home));
   }
 
   String _humanStatus(RideStatus s) {

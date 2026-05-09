@@ -29,6 +29,11 @@ abstract class RideApi {
   /// Latest snapshot of an in-flight ride (for polling fallback / refresh).
   Future<Ride> getLiveRide(String rideId);
 
+  /// Returns the rider's currently in-flight ride, if any. Used on cold start
+  /// to restore the in-progress flow when the user reopens the app. Returns
+  /// null when the rider has no active ride.
+  Future<Ride?> getActiveRide();
+
   /// Mark a payment as paid (mock — real impl would talk to the gateway).
   Future<Payment> completePayment(Payment payment);
 

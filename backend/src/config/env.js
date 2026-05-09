@@ -20,11 +20,11 @@ const env = {
     pickupRadiusKm: num(process.env.MATCH_PICKUP_RADIUS_KM, 2),
     maxDetourKm: num(process.env.MATCH_MAX_DETOUR_KM, 2),
     maxRidersPerCab: num(process.env.MATCH_MAX_RIDERS_PER_CAB, 3),
-    // Window during which a `shareEnabled=true` trip with no immediate match
-    // waits before falling back to solo dispatch. Lets a co-rider arriving
-    // moments later actually pair instead of finding the first rider already
-    // committed to a driver. 8s is a reasonable demo default.
-    dispatchDelayMs: num(process.env.MATCH_DISPATCH_DELAY_MS, 8000),
+    // Window during which a `shareEnabled=true` trip waits for a co-rider.
+    // After this expires the trip stays in `requested` state — we no longer
+    // auto-fall-back to solo dispatch; the rider explicitly decides what
+    // to do next from the empty-state UI on the searching screen.
+    dispatchDelayMs: num(process.env.MATCH_DISPATCH_DELAY_MS, 5 * 60 * 1000),
   },
 
   fare: {
@@ -35,12 +35,19 @@ const env = {
   },
 
   unlock: {
-    // How long an unlock is valid after creation, before it must be used.
-    ttlSeconds: num(process.env.UNLOCK_TTL_SECONDS, 60 * 60), // 1 hour
-    // Number of rewarded ads the rider must complete to earn one unlock.
+    // How long a paid unlock is valid after creation. 30 min is enough for
+    // one search journey (pick locations → ads/payment → wait for match
+    // → confirm) without letting riders sit on a paid pass for hours.
+    ttlSeconds: num(process.env.UNLOCK_TTL_SECONDS, 30 * 60), // 30 min
+    // Default number of rewarded ads the rider must complete to earn one
+    // unlock. Overridden per-rider by rating tiers in
+    // unlockController.adsRequiredForRating — high-rated riders get
+    // through faster, low-rated ones face more friction.
     adsPerUnlock: num(process.env.UNLOCK_ADS_PER_UNLOCK, 2),
-    // Price for the paid path, in paise. Final number TBD with the team.
-    pricePaise: num(process.env.UNLOCK_PRICE_PAISE, 1900), // ₹19.00 placeholder
+    // Price for the paid path, in paise. ₹50 ≈ 10% friction on a typical
+    // ₹500 shared-fare saving — small enough to be a casual one-tap, big
+    // enough to filter low-intent users.
+    pricePaise: num(process.env.UNLOCK_PRICE_PAISE, 5000), // ₹50.00
   },
 };
 
