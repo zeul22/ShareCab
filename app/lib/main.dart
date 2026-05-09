@@ -3,8 +3,8 @@ import 'package:provider/provider.dart';
 
 import 'routes.dart';
 import 'services/api/auth_api.dart';
-import 'services/api/mock_auth_api.dart';
-import 'services/api/mock_ride_api.dart';
+import 'services/api/http_auth_api.dart';
+import 'services/api/http_ride_api.dart';
 import 'services/api/ride_api.dart';
 import 'services/auth_service.dart';
 import 'services/location_service.dart';
@@ -40,16 +40,21 @@ class ShareCabApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The two API bindings — both mocked today, both swappable to HTTP impls
-    // when the backend is ready. Nothing else in the app touches transport.
-    final AuthApi authApi = MockAuthApi();
-    final RideApi rideApi = MockRideApi();
+    // Live API bindings — talk to the ShareCab backend at ApiConfig.apiRoot.
+    // AuthService is built before RideApi so the latter can borrow the
+    // token getter and the current rider's id (needed for unlock minting).
+    final AuthApi authApi = HttpAuthApi();
+    final authService = AuthService(authApi);
+    final RideApi rideApi = HttpRideApi(
+      tokenGetter: authService.accessTokenForApi,
+      riderIdGetter: () => authService.user?.id,
+    );
 
     return MultiProvider(
       providers: [
         Provider<AuthApi>.value(value: authApi),
         Provider<RideApi>.value(value: rideApi),
-        ChangeNotifierProvider(create: (_) => AuthService(authApi)),
+        ChangeNotifierProvider<AuthService>.value(value: authService),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => RideFlowState(rideApi)),
       ],

@@ -15,8 +15,10 @@ async function assignDriverForTrip(trip) {
     return null;
   }
 
-  driver.activeTrip = trip._id;
-  await driver.save();
+  await Driver.updateOne(
+    { _id: driver._id },
+    { $set: { activeTrips: [trip._id] } },
+  );
 
   trip.driver = driver._id;
   trip.status = 'driver_assigned';
@@ -26,18 +28,27 @@ async function assignDriverForTrip(trip) {
 }
 
 async function assignDriverForGroup(group) {
+  // A late joiner is added to a group that's already been dispatched; nothing
+  // more for the dispatcher to do — the joiner's trip already inherits the driver.
+  if (group.driver) return null;
+
   const driver = await findNearestAvailableDriver(group.centroidPickup);
   if (!driver) return null;
 
-  driver.activeTrip = group.trips[0];
-  await driver.save();
+  const tripIds = group.trips.map((t) => t);
+  await Driver.updateOne(
+    { _id: driver._id },
+    { $set: { activeTrips: tripIds } },
+  );
 
   group.driver = driver._id;
-  group.status = 'sealed';
+  if (tripIds.length >= env.match.maxRidersPerCab) {
+    group.status = 'sealed';
+  }
   await group.save();
 
   await Trip.updateMany(
-    { _id: { $in: group.trips } },
+    { _id: { $in: tripIds } },
     { $set: { driver: driver._id, status: 'driver_assigned' } },
   );
 
@@ -47,7 +58,7 @@ async function assignDriverForGroup(group) {
 async function findNearestAvailableDriver(nearPoint) {
   return Driver.findOne({
     isOnline: true,
-    activeTrip: null,
+    activeTrips: { $size: 0 },
     currentLocation: {
       $near: {
         $geometry: nearPoint,
@@ -58,6 +69,3 @@ async function findNearestAvailableDriver(nearPoint) {
 }
 
 module.exports = { assignDriverForTrip, assignDriverForGroup, findNearestAvailableDriver };
-
-// eslint-disable-next-line no-unused-vars
-const _maxDetour = env.match.maxDetourKm; // referenced for future routing-aware dispatch

@@ -37,7 +37,8 @@ class _LuggageScreenState extends State<LuggageScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('What are you carrying?')),
       body: SafeArea(
-        child: Padding(
+        bottom: false,
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -98,10 +99,16 @@ class _LuggageScreenState extends State<LuggageScreen> {
                   ],
                 ),
               ),
-              const Spacer(),
-              ElevatedButton(onPressed: _continue, child: const Text('Continue')),
+              const SizedBox(height: 24),
             ],
           ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: ElevatedButton(onPressed: _continue, child: const Text('Continue')),
         ),
       ),
     );

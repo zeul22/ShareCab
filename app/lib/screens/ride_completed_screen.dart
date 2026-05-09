@@ -13,7 +13,8 @@ class RideCompletedScreen extends StatelessWidget {
     final ride = context.watch<RideFlowState>().activeRide;
     return Scaffold(
       body: SafeArea(
-        child: Padding(
+        bottom: false,
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
@@ -57,13 +58,23 @@ class RideCompletedScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-              const Spacer(),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ElevatedButton(
                 onPressed: () =>
                     Navigator.of(context).pushReplacementNamed(Routes.rating),
                 child: const Text('Rate your ride'),
               ),
-              const SizedBox(height: 8),
               TextButton(
                 onPressed: () {
                   context.read<RideFlowState>().clear();

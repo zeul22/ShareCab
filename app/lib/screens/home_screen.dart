@@ -19,7 +19,8 @@ class _HomeScreenState extends State<HomeScreen> {
   GoogleMapController? _map;
 
   // City-center fallback while we wait for the user's GPS fix.
-  static const LatLng _fallbackCenter = LatLng(28.6315, 77.2167);
+  // Bengaluru (HSR Layout area) — primary launch city.
+  static const LatLng _fallbackCenter = LatLng(12.9148106, 77.6764023);
 
   @override
   void initState() {

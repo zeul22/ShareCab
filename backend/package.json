@@ -7,6 +7,11 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "dev:e2e": "node src/devServer.js",
+    "db:up": "cd .. && docker compose up -d mongo",
+    "db:down": "cd .. && docker compose down",
+    "db:logs": "cd .. && docker compose logs -f mongo",
+    "db:reset": "cd .. && docker compose down -v && docker compose up -d mongo",
     "lint": "eslint src/",
     "test": "jest"
   },

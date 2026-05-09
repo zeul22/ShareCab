@@ -18,6 +18,14 @@ class MockAuthApi implements AuthApi {
   static const String demoPhone = '9999900001';
   static const String demoOtp = '123456';
 
+  // Demo riders for cross-device matching tests. Phone -> display name.
+  // Any phone outside this map still logs in (mock accepts any valid format),
+  // it'll just show as "Rider".
+  static const Map<String, String> demoRiders = {
+    '9990000101': 'Demo Rider One',
+    '9990000102': 'Demo Rider Two',
+  };
+
   /// Production access tokens are short-lived; in the mock we keep that
   /// behavior (15 min) so the auto-refresh path actually exercises.
   static const Duration accessLifetime = Duration(minutes: 15);
@@ -89,10 +97,12 @@ class MockAuthApi implements AuthApi {
   }
 
   AppUser _seedUserForPhone(String phone) {
-    final isDemo = phone == demoPhone;
+    final name = phone == demoPhone
+        ? 'Aditya'
+        : (demoRiders[phone] ?? 'Rider');
     return AppUser(
       id: 'usr_${phone.hashCode.toUnsigned(32).toRadixString(16)}',
-      name: isDemo ? 'Aditya' : 'Rider',
+      name: name,
       phone: phone,
       email: null,
       role: 'rider',

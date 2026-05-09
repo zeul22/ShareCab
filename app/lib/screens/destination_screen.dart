@@ -41,6 +41,7 @@ class DestinationScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Plan your ride')),
       body: SafeArea(
+        bottom: false,
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -83,6 +84,17 @@ class DestinationScreen extends StatelessWidget {
                 onTap: () => pick(isPickup: false),
               ),
               const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ElevatedButton(
                 onPressed: pickup != null && dropoff != null
                     ? () => Navigator.of(context).pushNamed(Routes.luggage)

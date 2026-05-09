@@ -1,4 +1,5 @@
 const Trip = require('../models/Trip');
+const Driver = require('../models/Driver');
 const MatchGroup = require('../models/MatchGroup');
 const env = require('../config/env');
 const { distanceKm, fromGeoJSONPoint } = require('../utils/geo');
@@ -116,7 +117,18 @@ async function joinGroup(group, trip) {
   await group.save();
 
   trip.matchGroup = group._id;
-  trip.status = 'matched';
+  if (group.driver) {
+    // Group has already been dispatched — late joiner inherits the driver and
+    // is added to the driver's active-trip list so the cab is correctly tracked.
+    trip.driver = group.driver;
+    trip.status = 'driver_assigned';
+    await Driver.updateOne(
+      { _id: group.driver },
+      { $addToSet: { activeTrips: trip._id } },
+    );
+  } else {
+    trip.status = 'matched';
+  }
   await trip.save();
 
   logger.info(`Trip ${trip._id} joined group ${group._id} (${group.trips.length} riders)`);

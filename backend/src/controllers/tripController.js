@@ -1,17 +1,25 @@
 const { z } = require('zod');
 const Trip = require('../models/Trip');
+const Driver = require('../models/Driver');
 const MatchGroup = require('../models/MatchGroup');
+const User = require('../models/User');
+const Unlock = require('../models/Unlock');
+const env = require('../config/env');
+const logger = require('../utils/logger');
+const { isWithinIndia } = require('../utils/geo');
 const { HttpError } = require('../middleware/errorHandler');
 const { findMatchForTrip } = require('../services/matchingService');
 const { assignDriverForTrip, assignDriverForGroup } = require('../services/dispatchService');
 const { estimateSoloFare, estimateSharedFareForGroup } = require('../services/fareService');
 const { broadcastTripUpdate } = require('../services/notificationService');
 
-const point = z.object({
-  address: z.string().optional(),
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-});
+const point = z
+  .object({
+    address: z.string().optional(),
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  })
+  .refine(isWithinIndia, { message: 'Coordinates must be within India' });
 
 const requestSchema = z.object({
   pickup: point,
@@ -46,6 +54,25 @@ async function requestTrip(req, res, next) {
   try {
     const data = requestSchema.parse(req.body);
 
+    // Gate: shareEnabled requires an unconsumed unlock (earned by watching ads
+    // or via Razorpay payment). Atomically consume one in a single round-trip
+    // so two concurrent requests can't double-spend the same unlock.
+    let unlock = null;
+    if (data.shareEnabled) {
+      const now = new Date();
+      unlock = await Unlock.findOneAndUpdate(
+        { rider: req.auth.userId, usedAt: null, expiresAt: { $gt: now } },
+        { $set: { usedAt: now } },
+        { sort: { expiresAt: 1 } },
+      );
+      if (!unlock) {
+        throw new HttpError(
+          402,
+          'Matching gate not unlocked: complete 2 rewarded ads or pay to unlock',
+        );
+      }
+    }
+
     const trip = await Trip.create({
       rider: req.auth.userId,
       shareEnabled: data.shareEnabled,
@@ -59,6 +86,11 @@ async function requestTrip(req, res, next) {
       },
     });
 
+    // Tag the unlock with the trip it paid for, for audit/refund flows later.
+    if (unlock) {
+      await Unlock.updateOne({ _id: unlock._id }, { $set: { usedForTrip: trip._id } });
+    }
+
     // Fare estimate stored upfront for the rider's reference.
     const fare = estimateSoloFare({
       pickup: data.pickup,
@@ -69,11 +101,24 @@ async function requestTrip(req, res, next) {
     trip.durationMin = fare.durationMin;
     await trip.save();
 
-    // Try to match into / form a group, then dispatch a driver.
-    const group = data.shareEnabled ? await findMatchForTrip(trip._id) : null;
-
-    if (group) {
-      await assignDriverForGroup(group);
+    // Match-then-dispatch.
+    //
+    // For shareEnabled trips with no immediate match, we DEFER solo dispatch by
+    // env.match.dispatchDelayMs. This gives a co-rider arriving moments later
+    // a chance to pair via findMatchForTrip — without the delay, the first
+    // rider gets locked to a driver before the second rider's request lands,
+    // and they never group up.
+    //
+    // The deferred callback re-checks status before doing anything, so it
+    // self-cancels if the trip was matched, cancelled, or otherwise advanced
+    // during the wait.
+    if (data.shareEnabled) {
+      const group = await findMatchForTrip(trip._id);
+      if (group) {
+        await assignDriverForGroup(group);
+      } else {
+        scheduleDeferredDispatch(trip._id);
+      }
     } else {
       await assignDriverForTrip(trip);
     }
@@ -85,6 +130,29 @@ async function requestTrip(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+function scheduleDeferredDispatch(tripId) {
+  setTimeout(async () => {
+    try {
+      const trip = await Trip.findById(tripId);
+      // Self-cancel: trip may have already been matched/cancelled/dispatched
+      // by another path during the wait window.
+      if (!trip || trip.status !== 'requested') return;
+
+      const group = await findMatchForTrip(trip._id);
+      if (group) {
+        await assignDriverForGroup(group);
+      } else {
+        await assignDriverForTrip(trip);
+      }
+
+      const refreshed = await Trip.findById(tripId).populate('matchGroup driver');
+      await broadcastTripUpdate(refreshed);
+    } catch (err) {
+      logger.error(`Deferred dispatch failed for trip ${tripId}: ${err.message}`);
+    }
+  }, env.match.dispatchDelayMs);
 }
 
 async function getTrip(req, res, next) {
@@ -161,4 +229,110 @@ async function getGroupFare(req, res, next) {
   }
 }
 
-module.exports = { estimate, requestTrip, getTrip, listMyTrips, cancelTrip, getGroupFare };
+async function loadDriverTrip(req) {
+  const driver = await Driver.findOne({ user: req.auth.userId });
+  if (!driver) throw new HttpError(404, 'Driver profile not found');
+  const trip = await Trip.findById(req.params.id);
+  if (!trip) throw new HttpError(404, 'Trip not found');
+  if (!trip.driver || trip.driver.toString() !== driver._id.toString()) {
+    throw new HttpError(403, 'Not your trip');
+  }
+  return { driver, trip };
+}
+
+function tripScopeFilter(trip) {
+  return trip.matchGroup ? { matchGroup: trip.matchGroup } : { _id: trip._id };
+}
+
+async function arriveTrip(req, res, next) {
+  try {
+    const { trip } = await loadDriverTrip(req);
+    if (trip.status !== 'driver_assigned') {
+      throw new HttpError(400, `Cannot arrive from status ${trip.status}`);
+    }
+    const filter = tripScopeFilter(trip);
+    await Trip.updateMany(filter, { $set: { status: 'arriving' } });
+    const trips = await Trip.find(filter).populate('driver matchGroup');
+    res.json({ trips });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function startTrip(req, res, next) {
+  try {
+    const { trip } = await loadDriverTrip(req);
+    if (trip.status !== 'arriving') {
+      throw new HttpError(400, `Cannot start from status ${trip.status}`);
+    }
+    const filter = tripScopeFilter(trip);
+    await Trip.updateMany(filter, { $set: { status: 'in_progress', startedAt: new Date() } });
+    if (trip.matchGroup) {
+      await MatchGroup.findByIdAndUpdate(trip.matchGroup, { $set: { status: 'in_progress' } });
+    }
+    const trips = await Trip.find(filter).populate('driver matchGroup');
+    res.json({ trips });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function completeTrip(req, res, next) {
+  try {
+    const { driver, trip } = await loadDriverTrip(req);
+    if (trip.status !== 'in_progress') {
+      throw new HttpError(400, `Cannot complete from status ${trip.status}`);
+    }
+    const now = new Date();
+
+    let riderIds;
+    if (trip.matchGroup) {
+      const group = await MatchGroup.findById(trip.matchGroup).populate('trips');
+      const fare = estimateSharedFareForGroup(
+        group.trips.map((t) => ({
+          pickup: { lat: t.pickup.location.coordinates[1], lng: t.pickup.location.coordinates[0] },
+          dropoff: { lat: t.dropoff.location.coordinates[1], lng: t.dropoff.location.coordinates[0] },
+        })),
+      );
+      riderIds = group.trips.map((t) => t.rider);
+      await Trip.updateMany(
+        { matchGroup: trip.matchGroup },
+        { $set: { status: 'completed', completedAt: now, fareFinal: fare.perRider } },
+      );
+      group.status = 'completed';
+      await group.save();
+    } else {
+      riderIds = [trip.rider];
+      await Trip.updateOne(
+        { _id: trip._id },
+        { $set: { status: 'completed', completedAt: now, fareFinal: trip.fareEstimate } },
+      );
+    }
+
+    // Bump ride counters: each rider gets +1, the driver's user gets +1 (one drive).
+    await User.updateMany({ _id: { $in: riderIds } }, { $inc: { totalRides: 1 } });
+    await User.updateOne({ _id: driver.user }, { $inc: { totalRides: 1 } });
+
+    await Driver.updateOne(
+      { _id: driver._id },
+      { $set: { activeTrips: [] } },
+    );
+
+    const trips = await Trip.find(tripScopeFilter(trip)).populate('driver matchGroup');
+    res.json({ trips });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  estimate,
+  requestTrip,
+  getTrip,
+  listMyTrips,
+  cancelTrip,
+  getGroupFare,
+  arriveTrip,
+  startTrip,
+  completeTrip,
+};
