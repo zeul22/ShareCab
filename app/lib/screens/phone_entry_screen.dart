@@ -7,6 +7,11 @@ import '../services/api/mock_auth_api.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 
+const _demoRiderEntries = [
+  ('Demo Rider 1', '9990000101'),
+  ('Demo Rider 2', '9990000102'),
+];
+
 /// Step 1 of the auth flow: collect a phone number and request an OTP.
 class PhoneEntryScreen extends StatefulWidget {
   const PhoneEntryScreen({super.key});
@@ -42,10 +47,11 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
     }
   }
 
-  /// Tap-to-fill: drop the demo phone into the input AND immediately request
-  /// the OTP. Two taps total (this + demo OTP on the next screen) to log in.
-  Future<void> _useDemoPhone() async {
-    _phone.text = MockAuthApi.demoPhone;
+  /// Tap-to-fill: drop the chosen demo phone into the input AND immediately
+  /// request the OTP. Two taps total (this + demo OTP on the next screen) to
+  /// log in as the picked rider.
+  Future<void> _useDemoRider(String phone) async {
+    _phone.text = phone;
     setState(() => _error = null);
     await _send();
   }
@@ -54,7 +60,8 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
+        bottom: false,
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -107,19 +114,27 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                 Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
               ],
               const SizedBox(height: 18),
-              ElevatedButton(
-                onPressed: _busy ? null : _send,
-                child: _busy
-                    ? const SizedBox(
-                        height: 22,
-                        width: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                      )
-                    : const Text('Send OTP'),
+              _DemoAccountsPanel(
+                onUseDemo: _busy ? null : _useDemoRider,
               ),
-              const SizedBox(height: 18),
-              _DemoHint(onUseDemo: _busy ? null : _useDemoPhone),
+              const SizedBox(height: 24),
             ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+          child: ElevatedButton(
+            onPressed: _busy ? null : _send,
+            child: _busy
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                  )
+                : const Text('Send OTP'),
           ),
         ),
       ),
@@ -127,75 +142,126 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   }
 }
 
-class _DemoHint extends StatelessWidget {
-  final VoidCallback? onUseDemo;
-  const _DemoHint({required this.onUseDemo});
+/// Panel listing the seeded demo riders. Tap any row to autofill the phone
+/// and request an OTP — the next screen pre-fills [MockAuthApi.demoOtp].
+/// Use two phones across two devices to exercise the matching flow.
+class _DemoAccountsPanel extends StatelessWidget {
+  final ValueChanged<String>? onUseDemo;
+  const _DemoAccountsPanel({required this.onUseDemo});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppTheme.brandLight,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.lightbulb_outline, size: 20, color: AppTheme.brandDark),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Demo login',
-                  style: TextStyle(
-                    color: AppTheme.brandDark,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
-                  ),
+          const Row(
+            children: [
+              Icon(Icons.lightbulb_outline, size: 20, color: AppTheme.brandDark),
+              SizedBox(width: 8),
+              Text(
+                'Demo riders',
+                style: TextStyle(
+                  color: AppTheme.brandDark,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
                 ),
-                SizedBox(height: 2),
-                Text.rich(
-                  TextSpan(
-                    style: TextStyle(
-                      color: AppTheme.brandDark,
-                      fontSize: 13,
-                      height: 1.4,
-                    ),
-                    children: [
-                      TextSpan(text: 'Phone '),
-                      TextSpan(
-                        text: MockAuthApi.demoPhone,
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      TextSpan(text: '   ·   OTP '),
-                      TextSpan(
-                        text: MockAuthApi.demoOtp,
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Tap to autofill the phone AND immediately send the OTP.
-          IconButton(
-            tooltip: 'Use demo phone',
-            onPressed: onUseDemo,
-            icon: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
               ),
-              child: const Icon(Icons.flash_on, size: 18, color: AppTheme.brand),
-            ),
+              Spacer(),
+              Text('OTP ', style: TextStyle(color: AppTheme.brandDark, fontSize: 12)),
+              Text(
+                MockAuthApi.demoOtp,
+                style: TextStyle(
+                  color: AppTheme.brandDark,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 10),
+          for (final entry in _demoRiderEntries) ...[
+            _DemoRiderRow(
+              label: entry.$1,
+              phone: entry.$2,
+              onTap: onUseDemo == null ? null : () => onUseDemo!(entry.$2),
+            ),
+            if (entry != _demoRiderEntries.last) const SizedBox(height: 6),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _DemoRiderRow extends StatelessWidget {
+  final String label;
+  final String phone;
+  final VoidCallback? onTap;
+
+  const _DemoRiderRow({
+    required this.label,
+    required this.phone,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppTheme.brandDark,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                phone,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Copy phone',
+                visualDensity: VisualDensity.compact,
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: phone));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Copied $phone'),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.copy, size: 18, color: AppTheme.brand),
+              ),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppTheme.brandLight,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.flash_on, size: 16, color: AppTheme.brand),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

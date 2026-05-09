@@ -39,6 +39,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Payment')),
       body: SafeArea(
+        bottom: false,
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -94,26 +95,36 @@ class _PaymentScreenState extends State<PaymentScreen> {
               method: _method,
               onChanged: (m) => setState(() => _method = m),
             ),
-            const SizedBox(height: 28),
-            ElevatedButton(
-              onPressed: _busy ? null : _pay,
-              child: _busy
-                  ? const SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                    )
-                  : Text(_timing == PaymentTiming.beforeRide
-                      ? 'Pay ₹${ride.perRiderFare.toStringAsFixed(0)} now'
-                      : 'Confirm — pay later'),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Mock payment for the scaffold. Wire to a real gateway (Razorpay / Stripe) in production.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black45, fontSize: 12),
-            ),
           ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ElevatedButton(
+                onPressed: _busy ? null : _pay,
+                child: _busy
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                      )
+                    : Text(_timing == PaymentTiming.beforeRide
+                        ? 'Pay ₹${ride.perRiderFare.toStringAsFixed(0)} now'
+                        : 'Confirm — pay later'),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Mock payment for the scaffold. Wire to a real gateway (Razorpay / Stripe) in production.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.black45, fontSize: 12),
+              ),
+            ],
+          ),
         ),
       ),
     );

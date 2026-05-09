@@ -25,6 +25,7 @@ class RideConfirmationScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Ride confirmed')),
       body: SafeArea(
+        bottom: false,
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -145,12 +146,17 @@ class RideConfirmationScreen extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pushReplacementNamed(Routes.liveRide),
-              child: const Text('I’m ready — track ride'),
-            ),
           ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: ElevatedButton(
+            onPressed: () => Navigator.of(context).pushReplacementNamed(Routes.liveRide),
+            child: const Text('I’m ready — track ride'),
+          ),
         ),
       ),
     );

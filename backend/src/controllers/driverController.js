@@ -1,11 +1,14 @@
 const { z } = require('zod');
 const Driver = require('../models/Driver');
 const { HttpError } = require('../middleware/errorHandler');
+const { isWithinIndia } = require('../utils/geo');
 
-const locationSchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lng: z.number().min(-180).max(180),
-});
+const locationSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  })
+  .refine(isWithinIndia, { message: 'Coordinates must be within India' });
 
 async function setOnline(req, res, next) {
   try {

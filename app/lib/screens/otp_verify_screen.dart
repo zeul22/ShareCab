@@ -104,7 +104,8 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
         ),
       ),
       body: SafeArea(
-        child: Padding(
+        bottom: false,
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -172,7 +173,18 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                         _verify(MockAuthApi.demoOtp);
                       },
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ElevatedButton(
                 onPressed: _busy ? null : () => _verify(_otp.text),
                 child: _busy
@@ -183,18 +195,15 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                       )
                     : const Text('Verify & log in'),
               ),
-              const SizedBox(height: 16),
-              Center(
-                child: TextButton(
-                  onPressed: canResend ? _resend : null,
-                  child: Text(
-                    canResend
-                        ? 'Resend OTP'
-                        : 'Resend in ${_resendSecondsLeft}s',
-                    style: TextStyle(
-                      color: canResend ? AppTheme.brand : Colors.black45,
-                      fontWeight: FontWeight.w600,
-                    ),
+              TextButton(
+                onPressed: canResend ? _resend : null,
+                child: Text(
+                  canResend
+                      ? 'Resend OTP'
+                      : 'Resend in ${_resendSecondsLeft}s',
+                  style: TextStyle(
+                    color: canResend ? AppTheme.brand : Colors.black45,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),

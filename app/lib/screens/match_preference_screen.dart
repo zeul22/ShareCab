@@ -16,7 +16,8 @@ class MatchPreferenceScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('How should we match you?')),
       body: SafeArea(
-        child: Padding(
+        bottom: false,
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -43,12 +44,18 @@ class MatchPreferenceScreen extends StatelessWidget {
                     .setPreference(MatchPreference.randomCompatible),
                 icon: Icons.shuffle,
               ),
-              const Spacer(),
-              ElevatedButton(
-                onPressed: () => Navigator.of(context).pushNamed(Routes.searching),
-                child: const Text('Find a match'),
-              ),
+              const SizedBox(height: 24),
             ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: ElevatedButton(
+            onPressed: () => Navigator.of(context).pushNamed(Routes.searching),
+            child: const Text('Find a match'),
           ),
         ),
       ),

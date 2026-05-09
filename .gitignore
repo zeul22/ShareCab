@@ -49,3 +49,6 @@ app/android/app/release/
 
 # Coverage
 coverage/
+
+# Local persistent dev MongoDB data (created by devServer.js)
+backend/.mongo-data/

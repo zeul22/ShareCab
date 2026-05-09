@@ -19,7 +19,9 @@ const driverSchema = new mongoose.Schema(
       coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
     },
 
-    activeTrip: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip', default: null },
+    // Trips the driver is currently committed to. Solo dispatch sets one entry;
+    // a shared MatchGroup sets one entry per co-rider. Empty ⇒ driver is free.
+    activeTrips: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Trip' }],
   },
   { timestamps: true },
 );

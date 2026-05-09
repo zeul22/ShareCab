@@ -5,5 +5,6 @@ router.use('/users', require('./user.routes'));
 router.use('/drivers', require('./driver.routes'));
 router.use('/trips', require('./trip.routes'));
 router.use('/ratings', require('./rating.routes'));
+router.use('/unlocks', require('./unlock.routes'));
 
 module.exports = router;

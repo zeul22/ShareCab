@@ -28,8 +28,8 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   late final PlacesService _places;
 
   // Default to a sensible city center if no initial point was supplied.
-  // Connaught Place, Delhi — easy to recognize and visually rich.
-  static const LatLng _defaultCenter = LatLng(28.6315, 77.2167);
+  // Bengaluru (HSR Layout area) — primary launch city.
+  static const LatLng _defaultCenter = LatLng(12.9148106, 77.6764023);
 
   late LatLng _center;
   String _address = '';

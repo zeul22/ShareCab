@@ -46,7 +46,8 @@ class _AirportArrivalScreenState extends State<AirportArrivalScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Find match after landing')),
       body: SafeArea(
-        child: Padding(
+        bottom: false,
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -88,12 +89,22 @@ class _AirportArrivalScreenState extends State<AirportArrivalScreen> {
                   ],
                 ),
               ),
-              const Spacer(),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ElevatedButton(
                 onPressed: _landsAt == null ? null : _continue,
                 child: const Text('Continue'),
               ),
-              const SizedBox(height: 8),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Skip — book now instead'),

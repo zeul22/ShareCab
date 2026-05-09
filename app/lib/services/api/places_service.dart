@@ -68,7 +68,12 @@ class PlacesService {
   bool get isConfigured => apiKey.isNotEmpty;
 
   Future<List<PlacePrediction>> autocomplete(String query) async {
-    if (!isConfigured) return const [];
+    if (!isConfigured) {
+      throw const _PlacesException(
+        0,
+        'Maps API key not configured. Build with --dart-define=GOOGLE_MAPS_KEY=AIza...',
+      );
+    }
     final input = query.trim();
     if (input.isEmpty) return const [];
 
@@ -78,7 +83,12 @@ class PlacesService {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
       },
-      body: jsonEncode({'input': input}),
+      body: jsonEncode({
+        'input': input,
+        // ShareCab is India-only; restrict suggestions to Indian places so a
+        // search like "Bangalore" doesn't surface "Bangalore, MA, USA".
+        'includedRegionCodes': ['in'],
+      }),
     );
 
     if (res.statusCode != 200) {
@@ -111,7 +121,13 @@ class PlacesService {
   }
 
   Future<PlaceDetails?> details(String placeId) async {
-    if (!isConfigured || placeId.isEmpty) return null;
+    if (placeId.isEmpty) return null;
+    if (!isConfigured) {
+      throw const _PlacesException(
+        0,
+        'Maps API key not configured. Build with --dart-define=GOOGLE_MAPS_KEY=AIza...',
+      );
+    }
 
     final res = await _client.get(
       Uri.parse('$_detailsUrlBase$placeId'),

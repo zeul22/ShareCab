@@ -1,0 +1,29 @@
+# Local-dev infrastructure for ShareCab.
+#
+#   docker compose up -d   # start (or restart) Mongo in the background
+#   docker compose down    # stop everything, keeping the data volume
+#   docker compose down -v # ALSO wipe the data volume (resets Mongo)
+#
+# The backend reads MONGODB_URI from process.env. The default in
+# backend/src/config/env.js points at the service below, so once Mongo is up,
+# `npm --prefix backend run dev` just works — no extra env wiring needed.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: sharecab-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - sharecab-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  sharecab-mongo-data:
+    name: sharecab-mongo-data

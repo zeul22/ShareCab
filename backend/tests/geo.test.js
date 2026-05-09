@@ -1,4 +1,4 @@
-const { distanceKm, toGeoJSONPoint, fromGeoJSONPoint } = require('../src/utils/geo');
+const { distanceKm, toGeoJSONPoint, fromGeoJSONPoint, isWithinIndia, INDIA_BOUNDS } = require('../src/utils/geo');
 const { _internals: { centroidOf } } = require('../src/services/matchingService');
 
 describe('distanceKm', () => {
@@ -52,6 +52,49 @@ describe('GeoJSON helpers', () => {
   test('round-trip preserves the point', () => {
     const p = { lat: 12.9352, lng: 77.6245 };
     expect(fromGeoJSONPoint(toGeoJSONPoint(p))).toEqual(p);
+  });
+});
+
+describe('isWithinIndia', () => {
+  test.each([
+    ['Bengaluru', { lat: 12.9716, lng: 77.5946 }],
+    ['Delhi', { lat: 28.6139, lng: 77.2090 }],
+    ['Mumbai', { lat: 19.0760, lng: 72.8777 }],
+    ['Srinagar (north)', { lat: 34.0837, lng: 74.7973 }],
+    ['Kanyakumari (south)', { lat: 8.0883, lng: 77.5385 }],
+    ['Port Blair (east)', { lat: 11.6234, lng: 92.7265 }],
+  ])('%s is within India', (_name, p) => {
+    expect(isWithinIndia(p)).toBe(true);
+  });
+
+  test.each([
+    ['London', { lat: 51.5074, lng: -0.1278 }],                // negative lng
+    ['New York', { lat: 40.7128, lng: -74.0060 }],
+    ['Singapore', { lat: 1.3521, lng: 103.8198 }],             // east of India bounds
+    ['Origin (0,0)', { lat: 0, lng: 0 }],
+    ['Tehran', { lat: 35.6892, lng: 51.3890 }],                // west of India bounds
+  ])('%s is rejected', (_name, p) => {
+    expect(isWithinIndia(p)).toBe(false);
+  });
+
+  // Known limitation: a rectangular bounding box can't separate Sri Lanka,
+  // Bangladesh, or southern Nepal — they sit inside India's lat/lng range.
+  // For MVP this is acceptable (we're guarding against obvious off-region
+  // requests, not policing borders). Switch to a polygon check + turf.js if
+  // tighter validation is ever needed.
+  test('does not exclude near-border neighboring states (documented limitation)', () => {
+    expect(isWithinIndia({ lat: 6.9271, lng: 79.8612 })).toBe(true); // Colombo
+  });
+
+  test('exposes the bounding box constants', () => {
+    expect(INDIA_BOUNDS).toMatchObject({
+      latMin: expect.any(Number),
+      latMax: expect.any(Number),
+      lngMin: expect.any(Number),
+      lngMax: expect.any(Number),
+    });
+    expect(INDIA_BOUNDS.latMin).toBeLessThan(INDIA_BOUNDS.latMax);
+    expect(INDIA_BOUNDS.lngMin).toBeLessThan(INDIA_BOUNDS.lngMax);
   });
 });
 

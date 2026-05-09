@@ -30,4 +30,19 @@ function fromGeoJSONPoint(point) {
   return { lat, lng };
 }
 
-module.exports = { distanceKm, toGeoJSONPoint, fromGeoJSONPoint };
+// Approximate bounding box of mainland India + Andaman & Nicobar.
+// Source: https://en.wikipedia.org/wiki/Geography_of_India (extreme points).
+// We deliberately err on the loose side at the borders — false positives at
+// land boundaries are fine; false negatives would reject legitimate trips.
+const INDIA_BOUNDS = Object.freeze({
+  latMin: 6.0, latMax: 37.5, lngMin: 68.0, lngMax: 97.5,
+});
+
+function isWithinIndia({ lat, lng }) {
+  return (
+    lat >= INDIA_BOUNDS.latMin && lat <= INDIA_BOUNDS.latMax &&
+    lng >= INDIA_BOUNDS.lngMin && lng <= INDIA_BOUNDS.lngMax
+  );
+}
+
+module.exports = { distanceKm, toGeoJSONPoint, fromGeoJSONPoint, INDIA_BOUNDS, isWithinIndia };
