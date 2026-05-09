@@ -20,6 +20,7 @@ class Routes {
   static const matchResult = '/match';
   static const routeStops = '/route-stops';
   static const rideConfirmation = '/confirm';
+  static const chat = '/chat';
   static const liveRide = '/ride';
   static const payment = '/payment';
   static const rideCompleted = '/completed';

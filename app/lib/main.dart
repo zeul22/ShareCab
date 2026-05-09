@@ -8,10 +8,13 @@ import 'services/api/http_ride_api.dart';
 import 'services/api/ride_api.dart';
 import 'services/auth_service.dart';
 import 'services/location_service.dart';
+import 'services/notification_service.dart';
 import 'services/ride_flow.dart';
 import 'theme/app_theme.dart';
+import 'widgets/ride_flow_banner.dart';
 
 import 'screens/airport_arrival_screen.dart';
+import 'screens/chat_screen.dart';
 import 'screens/destination_screen.dart';
 import 'screens/help_safety_screen.dart';
 import 'screens/home_screen.dart';
@@ -31,8 +34,35 @@ import 'screens/route_stops_screen.dart';
 import 'screens/searching_screen.dart';
 import 'screens/splash_screen.dart';
 
-void main() {
+Future<void> main() async {
+  // Required before any plugin-channel call (incl. NotificationService.init).
+  WidgetsFlutterBinding.ensureInitialized();
+  // Best-effort: notification init is wrapped in try/catch so a failed
+  // permission grant or unavailable channel doesn't block app launch.
+  await NotificationService.instance.init();
   runApp(const ShareCabApp());
+}
+
+/// Tracks the topmost route name in a [ValueNotifier] so the global
+/// [RideFlowBanner] can hide itself when the user is already on the screen
+/// that natively renders that state.
+class _CurrentRouteObserver extends NavigatorObserver {
+  final ValueNotifier<String?> currentRoute = ValueNotifier<String?>(null);
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    currentRoute.value = route.settings.name;
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    currentRoute.value = previousRoute?.settings.name;
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    currentRoute.value = newRoute?.settings.name;
+  }
 }
 
 class ShareCabApp extends StatelessWidget {
@@ -50,6 +80,13 @@ class ShareCabApp extends StatelessWidget {
       riderIdGetter: () => authService.user?.id,
     );
 
+    // Navigator key + route observer power the global RideFlowBanner: the
+    // banner sits above the Navigator in the widget tree (so it can overlay
+    // every screen) and uses these to (a) know which route is on top and
+    // (b) push the appropriate destination when tapped.
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final routeObserver = _CurrentRouteObserver();
+
     return MultiProvider(
       providers: [
         Provider<AuthApi>.value(value: authApi),
@@ -62,6 +99,26 @@ class ShareCabApp extends StatelessWidget {
         title: 'ShareCab',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
+        navigatorKey: navigatorKey,
+        navigatorObservers: [routeObserver],
+        // The builder wraps every screen with a bottom-floating banner that
+        // surfaces "still searching" / "match found" / "ride in progress"
+        // state app-wide, so the rider can navigate around while a search
+        // is in flight without losing track of it.
+        builder: (_, child) => Stack(
+          children: [
+            child!,
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: RideFlowBanner(
+                currentRoute: routeObserver.currentRoute,
+                navigatorKey: navigatorKey,
+              ),
+            ),
+          ],
+        ),
         initialRoute: Routes.splash,
         routes: {
           Routes.splash: (_) => const SplashScreen(),
@@ -87,6 +144,20 @@ class ShareCabApp extends StatelessWidget {
           Routes.rating: (_) => const RatingScreen(),
 
           Routes.history: (_) => const RideHistoryScreen(),
+        },
+        // ChatScreen takes a required groupId, so it can't live in the
+        // const-builder routes map above. Push via:
+        //   Navigator.pushNamed(Routes.chat, arguments: groupId)
+        onGenerateRoute: (settings) {
+          if (settings.name == Routes.chat) {
+            final groupId = settings.arguments as String?;
+            if (groupId == null || groupId.isEmpty) return null;
+            return MaterialPageRoute(
+              settings: settings,
+              builder: (_) => ChatScreen(groupId: groupId),
+            );
+          }
+          return null;
         },
       ),
     );

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../routes.dart';
 import '../services/auth_service.dart';
+import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -23,9 +24,25 @@ class _SplashScreenState extends State<SplashScreen> {
     final auth = context.read<AuthService>();
     await auth.bootstrap();
     if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed(
-      auth.isAuthenticated ? Routes.home : Routes.phoneEntry,
-    );
+
+    if (!auth.isAuthenticated) {
+      Navigator.of(context).pushReplacementNamed(Routes.phoneEntry);
+      return;
+    }
+
+    // Authed — see if there's an in-flight ride to resume. If so, push
+    // Home first (so the user has a back-stack to fall back to) and then
+    // jump forward to the active screen. If not, just land on Home.
+    final flow = context.read<RideFlowState>();
+    final resumeRoute = await flow.restoreActiveRide();
+    if (!mounted) return;
+
+    if (resumeRoute != null) {
+      Navigator.of(context).pushReplacementNamed(Routes.home);
+      Navigator.of(context).pushNamed(resumeRoute);
+    } else {
+      Navigator.of(context).pushReplacementNamed(Routes.home);
+    }
   }
 
   @override

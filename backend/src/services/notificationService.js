@@ -37,4 +37,26 @@ async function broadcastTripUpdate(trip) {
   });
 }
 
-module.exports = { bind, notifyUser, notifyDriver, broadcastTripUpdate };
+// Fan a chat message out to every rider currently subscribed to the
+// group's room. Called from chatController.postMessage.
+async function broadcastChatMessage(groupId, message) {
+  if (!io) return;
+  io.to(`group:${groupId}`).emit('chat:message', message);
+}
+
+// Tell every subscribed client the chat history was wiped (called when
+// the group's composition changes — see tripController.cancelTrip and
+// matchingService.joinGroup). Clients should clear their local cache.
+async function broadcastChatReset(groupId) {
+  if (!io) return;
+  io.to(`group:${groupId}`).emit('chat:reset', { groupId: String(groupId) });
+}
+
+module.exports = {
+  bind,
+  notifyUser,
+  notifyDriver,
+  broadcastTripUpdate,
+  broadcastChatMessage,
+  broadcastChatReset,
+};

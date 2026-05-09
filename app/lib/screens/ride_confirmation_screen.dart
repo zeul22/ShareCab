@@ -9,21 +9,177 @@ import '../theme/app_theme.dart';
 
 /// Driver + car + OTP screen. The OTP is shown only after the user reaches
 /// this point (i.e. the ride is confirmed).
-class RideConfirmationScreen extends StatelessWidget {
+///
+/// Polls the active ride via [RideFlowState] so a co-rider's late cancellation
+/// updates this screen automatically (rider count + per-rider fare).
+class RideConfirmationScreen extends StatefulWidget {
   const RideConfirmationScreen({super.key});
 
   @override
+  State<RideConfirmationScreen> createState() => _RideConfirmationScreenState();
+}
+
+class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
+  // Cache the flow so dispose() doesn't have to look it up via context — at
+  // unmount time the InheritedWidget lookup throws (the element is no longer
+  // in the active tree). didChangeDependencies is the canonical hook to
+  // capture provider references for use in dispose.
+  RideFlowState? _flow;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _flow = context.read<RideFlowState>();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _flow?.startWatching();
+    });
+  }
+
+  @override
+  void dispose() {
+    // Stop polling here — the live-ride screen takes over from this point and
+    // will re-arm watching if needed.
+    _flow?.stopWatching();
+    super.dispose();
+  }
+
+  /// Co-rider just cancelled and we're now alone in the group. Give the
+  /// rider a clear binary: keep this ride at the (higher) solo fare, or
+  /// cancel + restart the search for a new co-rider. The fare shown is
+  /// the freshly-recomputed solo amount (rebuilt by the polling watcher).
+  Future<void> _showCoRiderLostDialog(double soloFare) async {
+    final waitForAnother = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false, // force an explicit choice
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Your co-rider cancelled'),
+        content: Text(
+          "You're the only rider now. Continue solo at ₹${soloFare.toStringAsFixed(0)} "
+          '(the full fare), or wait for another co-rider to share with?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('Continue solo'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.brandDark),
+            child: const Text('Wait for another'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    final flow = context.read<RideFlowState>();
+    if (waitForAnother == true) {
+      // Cancel the now-solo trip and start a fresh 5-min search.
+      await flow.searchForAnother();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed(Routes.searching);
+    } else {
+      // Keep the trip as-is. The screen rebuilds with the solo fare; the
+      // existing "I'm ready — track ride" CTA continues to work.
+      flow.continueSolo();
+    }
+  }
+
+  /// Confirm-then-cancel the active ride. We always wrap with an
+  /// AlertDialog because cancellation is destructive — the trip is lost,
+  /// the co-rider's app gets a "co-rider cancelled" snackbar, and any
+  /// dispatched driver is freed.
+  Future<void> _confirmCancel(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Cancel ride?'),
+        content: const Text(
+          "You'll lose your match and the co-rider will be notified. "
+          'You can always book a new ride afterwards.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('Keep ride'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            child: const Text('Cancel ride'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    await context.read<RideFlowState>().cancelActiveRide();
+    if (!context.mounted) return;
+    Navigator.of(context).popUntil(ModalRoute.withName(Routes.home));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final ride = context.watch<RideFlowState>().activeRide;
+    final flow = context.watch<RideFlowState>();
+    final ride = flow.activeRide;
 
     if (ride == null) {
       return const Scaffold(body: Center(child: Text('No active ride.')));
     }
 
+    // Surface state-change toast from polling (e.g. "co-rider cancelled").
+    final toast = flow.toastMessage;
+    if (toast != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text(toast),
+            duration: const Duration(seconds: 3),
+          ));
+        context.read<RideFlowState>().clearToast();
+      });
+    }
+
+    // Polling watcher just told us the rider lost ALL their co-riders —
+    // pop a dialog asking whether to wait for another one or proceed solo.
+    if (flow.coRiderLostPending) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // Clear the flag immediately so a subsequent rebuild doesn't
+        // re-trigger before the dialog closes.
+        context.read<RideFlowState>().clearCoRiderLost();
+        _showCoRiderLostDialog(ride.perRiderFare);
+      });
+    }
+
     final v = ride.driver.vehicle;
+    // The chat is meaningful only when there's actually a co-rider to talk
+    // to. Solo trips (riderCount == 1) hide the icon entirely.
+    final hasCoRider = ride.proposal.riderCount >= 2;
+    final groupId = ride.proposal.groupId;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ride confirmed')),
+      appBar: AppBar(
+        title: const Text('Ride confirmed'),
+        actions: [
+          if (hasCoRider && groupId != null)
+            IconButton(
+              tooltip: 'Chat with co-rider',
+              icon: const Icon(Icons.chat_bubble_outline),
+              onPressed: () => Navigator.of(context).pushNamed(
+                Routes.chat,
+                arguments: groupId,
+              ),
+            ),
+        ],
+      ),
       body: SafeArea(
         bottom: false,
         child: ListView(
@@ -153,9 +309,20 @@ class RideConfirmationScreen extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-          child: ElevatedButton(
-            onPressed: () => Navigator.of(context).pushReplacementNamed(Routes.liveRide),
-            child: const Text('I’m ready — track ride'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ElevatedButton(
+                onPressed: () =>
+                    Navigator.of(context).pushReplacementNamed(Routes.liveRide),
+                child: const Text('I’m ready — track ride'),
+              ),
+              TextButton(
+                onPressed: () => _confirmCancel(context),
+                style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+                child: const Text('Cancel ride'),
+              ),
+            ],
           ),
         ),
       ),

@@ -55,6 +55,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final loc = context.watch<LocationService>();
+    final flow = context.watch<RideFlowState>();
+
+    // True whenever there's something the rider should be aware of and able
+    // to jump back into. Covers active dispatched rides AND in-flight
+    // searches (proposals.isNotEmpty during searching/proposing stages).
+    final hasInFlightTrip = flow.activeRide != null ||
+        (flow.proposals.isNotEmpty &&
+            (flow.stage == FlowStage.searching ||
+                flow.stage == FlowStage.proposing));
 
     final initial = loc.current != null
         ? LatLng(loc.current!.lat, loc.current!.lng)
@@ -134,20 +143,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    _BigAction(
-                      icon: Icons.search,
-                      title: 'Book a shared ride',
-                      subtitle: 'Pick a destination and we’ll find a co-rider going your way.',
-                      onTap: _startStandardFlow,
-                    ),
-                    const SizedBox(height: 10),
-                    _BigAction(
-                      icon: Icons.flight_land,
-                      title: 'Find match after landing',
-                      subtitle: 'Travelling from the airport? Match with passengers landing at the same time.',
-                      onTap: _startAirportFlow,
-                      tone: _Tone.brand,
-                    ),
+                    if (hasInFlightTrip)
+                      _ActiveTripCard(flow: flow)
+                    else ...[
+                      _BigAction(
+                        icon: Icons.search,
+                        title: 'Book a shared ride',
+                        subtitle: 'Pick a destination and we’ll find a co-rider going your way.',
+                        onTap: _startStandardFlow,
+                      ),
+                      const SizedBox(height: 10),
+                      _BigAction(
+                        icon: Icons.flight_land,
+                        title: 'Find match after landing',
+                        subtitle: 'Travelling from the airport? Match with passengers landing at the same time.',
+                        onTap: _startAirportFlow,
+                        tone: _Tone.brand,
+                      ),
+                    ],
 
                     const SizedBox(height: 18),
                     Row(
@@ -212,6 +225,148 @@ class _CircleButton extends StatelessWidget {
       child: IconButton(icon: Icon(icon), onPressed: onTap),
     );
   }
+}
+
+/// Replaces the booking CTAs whenever the rider has an in-flight trip.
+/// Routes them back to the right screen for the current stage rather than
+/// letting them start a second trip (which the backend would 409 anyway).
+class _ActiveTripCard extends StatelessWidget {
+  final RideFlowState flow;
+  const _ActiveTripCard({required this.flow});
+
+  @override
+  Widget build(BuildContext context) {
+    // Pick the most-specific message + jump target for the current stage.
+    final spec = _specFor(flow);
+    return InkWell(
+      onTap: () => Navigator.of(context).pushNamed(spec.targetRoute),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+        decoration: BoxDecoration(
+          color: AppTheme.brand,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(spec.icon, color: AppTheme.brand),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'ACTIVE RIDE',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        spec.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        spec.subtitle,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.white),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  _ActiveTripSpec _specFor(RideFlowState flow) {
+    final ride = flow.activeRide;
+
+    // Post-accept (driver assigned / arriving / in_progress): take them to
+    // RideConfirmation, which is also the natural place to access cancel.
+    if (ride != null) {
+      switch (flow.stage) {
+        case FlowStage.inRide:
+          return const _ActiveTripSpec(
+            icon: Icons.directions_car,
+            title: 'Ride in progress',
+            subtitle: 'Tap to view your live ride',
+            targetRoute: Routes.liveRide,
+          );
+        case FlowStage.paying:
+          return const _ActiveTripSpec(
+            icon: Icons.payments_outlined,
+            title: 'Payment due',
+            subtitle: 'Tap to settle your share',
+            targetRoute: Routes.payment,
+          );
+        default:
+          return const _ActiveTripSpec(
+            icon: Icons.check_circle,
+            title: 'Ride confirmed',
+            subtitle: 'Tap to view OTP, driver & cancel option',
+            targetRoute: Routes.rideConfirmation,
+          );
+      }
+    }
+
+    // Match found, awaiting confirm/reject.
+    if (flow.stage == FlowStage.proposing) {
+      return const _ActiveTripSpec(
+        icon: Icons.handshake_outlined,
+        title: 'Match found — confirm or reject',
+        subtitle: 'Tap to review the proposal',
+        targetRoute: Routes.matchResult,
+      );
+    }
+
+    // Default = still searching.
+    return const _ActiveTripSpec(
+      icon: Icons.search,
+      title: 'Looking for a co-rider',
+      subtitle: 'Tap to view your search',
+      targetRoute: Routes.searching,
+    );
+  }
+}
+
+class _ActiveTripSpec {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String targetRoute;
+  const _ActiveTripSpec({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.targetRoute,
+  });
 }
 
 enum _Tone { neutral, brand }

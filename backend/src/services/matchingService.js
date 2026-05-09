@@ -1,8 +1,10 @@
 const Trip = require('../models/Trip');
 const Driver = require('../models/Driver');
 const MatchGroup = require('../models/MatchGroup');
+const Message = require('../models/Message');
 const env = require('../config/env');
 const { distanceKm, fromGeoJSONPoint } = require('../utils/geo');
+const { broadcastChatReset } = require('./notificationService');
 const logger = require('../utils/logger');
 
 /**
@@ -35,8 +37,15 @@ async function findMatchForTrip(tripId) {
   const tripDrop = fromGeoJSONPoint(trip.dropoff.location);
 
   // 1. Try to join an existing forming MatchGroup.
+  // Defense-in-depth: only consider trips/groups that are still inside the
+  // active match window. The deferred-dispatch timer also auto-cancels stale
+  // ones, but if the server crashed between request and timer fire, this
+  // floor stops orphans from being pulled into new matches.
+  const freshAfter = new Date(Date.now() - env.match.dispatchDelayMs);
+
   const candidateGroups = await MatchGroup.find({
     status: 'forming',
+    createdAt: { $gt: freshAfter },
     centroidPickup: {
       $near: {
         $geometry: trip.pickup.location,
@@ -60,6 +69,7 @@ async function findMatchForTrip(tripId) {
     status: 'requested',
     shareEnabled: true,
     matchGroup: null,
+    createdAt: { $gt: freshAfter },
     'pickup.location': {
       $near: {
         $geometry: trip.pickup.location,
@@ -101,6 +111,14 @@ async function formGroup(trips) {
 }
 
 async function joinGroup(group, trip) {
+  // A new rider is joining — wipe any chat history the existing members
+  // built up so the joiner doesn't see private prior conversation. Done
+  // BEFORE pushing so a stray race-condition reader can't catch the
+  // composition mid-update with old messages still attached. The reset
+  // broadcast tells already-connected clients to clear their local cache.
+  await Message.deleteMany({ matchGroup: group._id });
+  await broadcastChatReset(group._id);
+
   group.trips.push(trip._id);
 
   const tripsInGroup = await Trip.find({ _id: { $in: group.trips } });
