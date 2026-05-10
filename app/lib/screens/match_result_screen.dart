@@ -292,6 +292,7 @@ class _ProposalCard extends StatelessWidget {
                 ...proposal.coPassengers.map((p) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           CircleAvatar(
                             radius: 16,
@@ -305,12 +306,34 @@ class _ProposalCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 10),
+                          // Name + rating on top, dropoff address (often a
+                          // long reverse-geocoded string) on its own line
+                          // below with ellipsis. Without the Expanded, long
+                          // addresses overflow the row and squeeze the name
+                          // column down to a single-character width.
                           Expanded(
-                            child: Text('${p.firstName} · ${p.rating.toStringAsFixed(1)}★'),
-                          ),
-                          Text(
-                            p.dropoff.address.isEmpty ? 'Drop nearby' : p.dropoff.address,
-                            style: const TextStyle(color: Colors.black54, fontSize: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${p.firstName} · ${p.rating.toStringAsFixed(1)}★',
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  p.dropoff.address.isEmpty
+                                      ? 'Drop nearby'
+                                      : p.dropoff.address,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 12,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

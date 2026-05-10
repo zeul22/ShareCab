@@ -22,18 +22,31 @@ export const metadata: Metadata = {
     template: `%s · ${env.siteName}`,
   },
   description,
-  icons: { icon: '/favicon.svg' },
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/sharecab-icon.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: '/sharecab-icon.png',
+  },
   openGraph: {
     title: `${env.siteName} — Share the cab. Split the fare.`,
     description,
     url: env.siteUrl,
     siteName: env.siteName,
     type: 'website',
+    // Wide brand image renders well in social previews; square fallback
+    // is for clients that crop to 1:1 (Slack, iMessage thumbnails).
+    images: [
+      { url: '/sharecab-logo.png', width: 3624, height: 1184, alt: env.siteName },
+      { url: '/sharecab-icon.png', width: 1254, height: 1254, alt: env.siteName },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: `${env.siteName} — Share the cab. Split the fare.`,
     description,
+    images: ['/sharecab-logo.png'],
   },
 };
 

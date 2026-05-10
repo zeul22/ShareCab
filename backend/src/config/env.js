@@ -34,6 +34,51 @@ const env = {
     shareDiscount: num(process.env.FARE_SHARE_DISCOUNT, 0.3),
   },
 
+  msg91: {
+    // Server-side authkey used by the backend to talk to MSG91 (send
+    // OTP, verify OTP, validate widget access tokens). NEVER ship this
+    // in the Flutter app. Empty string makes /auth/otp/* return 503.
+    authKey: process.env.MSG91_AUTH_KEY || '',
+    // DLT-registered SMS template id with an `##OTP##` (or equivalent)
+    // placeholder. Required to send OTP via MSG91 — without it the
+    // sendOtp call refuses to fire and the controller returns 503 so
+    // the failure is loud, not silent.
+    templateId: process.env.MSG91_TEMPLATE_ID || '',
+    // Explicit opt-in for the dev OTP (`123456`) while DLT registration
+    // is pending. When TRUE, /auth/otp/{request,verify} skip MSG91 and
+    // run the local-only path. Production must NEVER set this — turning
+    // it on lets anyone log in as any phone with the hardcoded code.
+    devFallback: (process.env.MSG91_DEV_FALLBACK || '').toLowerCase() === 'true',
+    // Override only for tests. The real prod URL is the default.
+    verifyUrl:
+      process.env.MSG91_VERIFY_URL ||
+      'https://control.msg91.com/api/v5/widget/verifyAccessToken',
+  },
+
+  razorpay: {
+    // Test-mode keys are fine for local dev; switch to live keys in prod.
+    // If keyId/keySecret are missing, the platform falls back to STUB mode
+    // (orders are fake-created, signatures aren't verified) so the demo
+    // keeps working without real credentials.
+    keyId: process.env.RAZORPAY_KEY_ID || '',
+    keySecret: process.env.RAZORPAY_KEY_SECRET || '',
+    // Webhook secret is the separate one configured in Razorpay dashboard
+    // for server-to-server callbacks. Used by the webhook HMAC verifier.
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
+  },
+
+  driverSub: {
+    // Monthly driver subscription. Drivers without an active sub are
+    // blocked at /api/drivers/online. Pricing TBD — ₹199/month is roughly
+    // 1% of a typical tier-1 driver's monthly revenue (meaningful but not
+    // punitive). Configurable so ops can A/B different tiers.
+    pricePaise: num(process.env.DRIVER_SUBSCRIPTION_PRICE_PAISE, 19900), // ₹199
+    daysPerCycle: num(process.env.DRIVER_SUBSCRIPTION_DAYS, 30),
+    // First-month-free at signup to seed driver supply during launch.
+    // Set to 0 to disable.
+    freeTrialDays: num(process.env.DRIVER_FREE_TRIAL_DAYS, 30),
+  },
+
   unlock: {
     // How long a paid unlock is valid after creation. 30 min is enough for
     // one search journey (pick locations → ads/payment → wait for match

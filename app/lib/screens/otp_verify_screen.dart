@@ -8,6 +8,7 @@ import '../routes.dart';
 import '../services/api/mock_auth_api.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/api_config.dart';
 
 /// Step 2 of the auth flow: enter the 6-digit OTP. Auto-submits when full.
 /// Includes a 30-second cool-down before the user can resend.
@@ -58,9 +59,14 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       _error = null;
     });
     try {
-      await context.read<AuthService>().verifyOtp(otp);
+      final auth = context.read<AuthService>();
+      await auth.verifyOtp(otp);
       if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(Routes.home, (_) => false);
+      // Route by role so a driver lands on DriverHome instead of the rider
+      // home (and vice-versa). Single source of truth in Routes.homeForRole
+      // — splash uses the same helper.
+      final dest = Routes.homeForRole(auth.user?.role);
+      Navigator.of(context).pushNamedAndRemoveUntil(dest, (_) => false);
     } catch (e) {
       setState(() {
         _error = e.toString().replaceFirst(RegExp(r'^[A-Z]\w+: '), '');
@@ -163,16 +169,20 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                 Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
               ],
               const SizedBox(height: 14),
-              _DemoOtpHint(
-                onUseDemo: _busy
-                    ? null
-                    : () {
-                        _otp.text = MockAuthApi.demoOtp;
-                        // Bypass the on-change auto-submit listener (it only
-                        // fires on user typing) and verify directly.
-                        _verify(MockAuthApi.demoOtp);
-                      },
-              ),
+              // Demo-OTP hint is dev-mode only. With MSG91 wired up the
+              // real OTP arrives via SMS, so showing a "use demo OTP"
+              // button would just lead users into a guaranteed failure.
+              if (!ApiConfig.msg91Enabled)
+                _DemoOtpHint(
+                  onUseDemo: _busy
+                      ? null
+                      : () {
+                          _otp.text = MockAuthApi.demoOtp;
+                          // Bypass the on-change auto-submit listener (it only
+                          // fires on user typing) and verify directly.
+                          _verify(MockAuthApi.demoOtp);
+                        },
+                ),
               const SizedBox(height: 24),
             ],
           ),

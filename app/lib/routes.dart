@@ -3,11 +3,19 @@
 class Routes {
   const Routes._();
 
+  /// Single source of truth for "where does this user belong post-auth".
+  /// Used by the splash + OTP-verify screens so we can't accidentally land
+  /// a driver on the rider home (or vice-versa) from one of them.
+  static String homeForRole(String? role) =>
+      role == 'driver' ? driverHome : home;
+
   static const splash = '/';
   static const phoneEntry = '/auth/phone';
   static const otpVerify = '/auth/otp';
 
   static const home = '/home';
+  static const driverHome = '/driver/home';
+  static const driverActiveTrip = '/driver/active';
   static const profile = '/profile';
   static const helpSafety = '/help';
 

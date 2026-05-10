@@ -30,7 +30,16 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    // Authed — see if there's an in-flight ride to resume. If so, push
+    // Authed — pick the right home for the role. Drivers go to DriverHome
+    // and skip the rider-side restoreActiveRide flow entirely (they have
+    // their own active-dispatch surface inside DriverHome).
+    final homeRoute = Routes.homeForRole(auth.user?.role);
+    if (homeRoute == Routes.driverHome) {
+      Navigator.of(context).pushReplacementNamed(Routes.driverHome);
+      return;
+    }
+
+    // Rider path: see if there's an in-flight ride to resume. If so, push
     // Home first (so the user has a back-stack to fall back to) and then
     // jump forward to the active screen. If not, just land on Home.
     final flow = context.read<RideFlowState>();
@@ -53,27 +62,31 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            // Square app icon on a white rounded tile so it reads cleanly
+            // against the brand-coloured background. 96px matches the
+            // visual weight of the original "S" placeholder while still
+            // letting the icon detail be legible.
             Container(
-              width: 64,
-              height: 64,
-              alignment: Alignment.center,
+              width: 96,
+              height: 96,
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(20),
               ),
-              child: const Text(
-                'S',
-                style: TextStyle(
-                  color: AppTheme.brand,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
+              clipBehavior: Clip.antiAlias,
+              child: Image.asset(
+                'assets/appIcon.png',
+                fit: BoxFit.cover,
               ),
             ),
             const SizedBox(height: 16),
             const Text(
               'ShareCab',
-              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 6),
             const Text(

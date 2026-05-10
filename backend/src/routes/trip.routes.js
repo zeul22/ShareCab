@@ -14,7 +14,10 @@ router.get('/groups/:id/fare', requireAuth, ctrl.getGroupFare);
 
 // Driver-only lifecycle transitions.
 router.post('/:id/arrive', requireAuth, requireRole('driver'), ctrl.arriveTrip);
-router.post('/:id/start', requireAuth, requireRole('driver'), ctrl.startTrip);
-router.post('/:id/complete', requireAuth, requireRole('driver'), ctrl.completeTrip);
+// Per-rider lifecycle. The driver hits these once per stop (the app's
+// geofence banner surfaces the right rider). Replaces the old bulk
+// /start + /complete which couldn't represent a partially-loaded cab.
+router.post('/:id/picked-up', requireAuth, requireRole('driver'), ctrl.pickUpRider);
+router.post('/:id/dropped', requireAuth, requireRole('driver'), ctrl.dropOffRider);
 
 module.exports = router;

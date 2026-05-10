@@ -6,6 +6,7 @@ import '../models/ride.dart';
 import '../models/route_stop.dart';
 import '../routes.dart';
 import '../services/ride_flow.dart';
+import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 
 /// Live ride status. After confirmation, the rider sits here while the cab
@@ -23,10 +24,30 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
   GoogleMapController? _map;
   bool _fittedOnce = false;
 
+  // Road-following polyline from Directions API. Null until fetched; we
+  // render the straight-line stop sequence in the meantime so the rider
+  // always has a route drawn. [_lastFingerprint] dedupes fetches when
+  // build re-runs on every poll tick from RideFlowState.
+  List<LatLng>? _roadPoints;
+  String? _lastFingerprint;
+
   @override
   void dispose() {
     _map?.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchRoute(List<LatLng> stops) async {
+    if (stops.length < 2) return;
+    final fp = stops
+        .map((p) =>
+            '${p.latitude.toStringAsFixed(5)},${p.longitude.toStringAsFixed(5)}')
+        .join('|');
+    if (fp == _lastFingerprint) return;
+    _lastFingerprint = fp;
+    final road = await RouteService.instance.routeThrough(stops);
+    if (!mounted) return;
+    setState(() => _roadPoints = road);
   }
 
   Future<void> _fitBounds(List<LatLng> points) async {
@@ -70,9 +91,34 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
       });
     }
 
-    final points = ride.proposal.stops
+    // Driver pressed "Reached drop" on their side → backend flips this
+    // rider's trip to completed → polling watcher syncs the local state.
+    // We then auto-advance to payment so the rider doesn't have to press
+    // a button at the end (the old "I've reached" button is gone).
+    if (ride.status == RideStatus.completed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // Use pushReplacement so the back button doesn't bounce the
+        // rider back into a completed ride view.
+        Navigator.of(context).pushReplacementNamed(Routes.payment);
+      });
+    }
+
+    final stopPoints = ride.proposal.stops
         .map((s) => LatLng(s.place.lat, s.place.lng))
         .toList(growable: false);
+
+    // Kick off (or reuse) the Directions fetch. Deferred to a post-frame
+    // callback so we don't call setState during build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _fetchRoute(stopPoints);
+    });
+
+    // Polyline rendering uses road-following points when available, else
+    // falls back to the straight-line stop sequence so there's always a
+    // route on the map.
+    final polylinePoints = _roadPoints ?? stopPoints;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Your ride')),
@@ -81,10 +127,13 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
           children: [
             Expanded(
               child: GoogleMap(
-                initialCameraPosition: CameraPosition(target: points.first, zoom: 13),
+                initialCameraPosition:
+                    CameraPosition(target: stopPoints.first, zoom: 13),
                 onMapCreated: (c) {
                   _map = c;
-                  _fitBounds(points);
+                  // Fit bounds on the actual rendered polyline so the
+                  // road bends are visible, not just the stop endpoints.
+                  _fitBounds(polylinePoints);
                 },
                 myLocationEnabled: true,
                 myLocationButtonEnabled: false,
@@ -93,7 +142,7 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
                 polylines: {
                   Polyline(
                     polylineId: const PolylineId('route'),
-                    points: points,
+                    points: polylinePoints,
                     color: AppTheme.brand,
                     width: 4,
                     patterns: [PatternItem.dash(20), PatternItem.gap(10)],
@@ -219,28 +268,19 @@ class _RideCard extends StatelessWidget {
             style: const TextStyle(color: Colors.black54),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () {/* SOS hook */},
-                  icon: const Icon(Icons.shield_outlined),
-                  label: const Text('SOS'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    await context.read<RideFlowState>().markRideComplete();
-                    if (!context.mounted) return;
-                    Navigator.of(context).pushReplacementNamed(Routes.payment);
-                  },
-                  icon: const Icon(Icons.flag_outlined),
-                  label: const Text('I’ve reached'),
-                ),
-              ),
-            ],
+          // Driver-pushed completion: the driver presses "Reached drop"
+          // on their end; we sync via polling and auto-advance the rider
+          // to payment. So no "I've reached" button here — just a status
+          // chip telling the rider what to expect, plus SOS.
+          _DriverProgressChip(status: ride.status),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {/* SOS hook */},
+              icon: const Icon(Icons.shield_outlined),
+              label: const Text('SOS'),
+            ),
           ),
           // Cancel still available mid-ride. Disable once the ride is in
           // an irreversible state (completed / cancelled).
@@ -302,5 +342,64 @@ class _RideCard extends StatelessWidget {
       case RideStatus.cancelled:
         return 'Cancelled';
     }
+  }
+}
+
+/// Replaces the old "I've reached" button. Surfaces what the driver is
+/// currently doing so the rider knows the trip will auto-advance to
+/// payment as soon as the driver presses "Reached drop" on their side.
+class _DriverProgressChip extends StatelessWidget {
+  final RideStatus status;
+  const _DriverProgressChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (text, icon) = switch (status) {
+      RideStatus.confirmed => (
+          'Driver is on the way to your pickup',
+          Icons.directions_car_outlined,
+        ),
+      RideStatus.arriving => (
+          'Driver is arriving — please be ready',
+          Icons.directions_run,
+        ),
+      RideStatus.inProgress => (
+          'On your way — driver will mark you dropped on arrival',
+          Icons.navigation_outlined,
+        ),
+      RideStatus.completed => (
+          'Trip complete · taking you to payment',
+          Icons.check_circle_outline,
+        ),
+      RideStatus.cancelled => (
+          'Ride cancelled',
+          Icons.cancel_outlined,
+        ),
+    };
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppTheme.brandLight,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppTheme.brandDark, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: AppTheme.brandDark,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

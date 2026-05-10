@@ -13,6 +13,12 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Required by flutter_local_notifications 17+ — its TimeZone APIs
+        // are java.time.* which need backporting onto Android API levels
+        // below 26. Without this the build fails with:
+        //   Dependency ':flutter_local_notifications' requires core library
+        //   desugaring to be enabled for :app.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -28,6 +34,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Multidex needed once desugaring + a few plugins push us past 64k
+        // method refs. Cheap to enable; expensive to debug if you hit the
+        // ceiling without it later.
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -37,6 +47,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    // Backport of java.time.* (and friends) onto pre-API-26 devices so
+    // flutter_local_notifications builds. Pinned to a version known to
+    // work with AGP 8.x.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 flutter {

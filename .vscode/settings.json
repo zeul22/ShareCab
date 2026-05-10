@@ -22,5 +22,6 @@
     "**/build": true,
     "**/.next": true,
     "**/node_modules": true
-  }
+  },
+  "java.configuration.updateBuildConfiguration": "interactive"
 }

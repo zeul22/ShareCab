@@ -364,66 +364,116 @@ async function arriveTrip(req, res, next) {
   }
 }
 
-async function startTrip(req, res, next) {
+// Per-rider pickup. The driver hits this when they reach a specific
+// rider's pickup point (their app's geofence banner surfaces the right
+// rider so they don't have to think about it). Advances ONLY this trip
+// from `arriving` → `in_progress`; siblings are unaffected. The first
+// pickup in a group also flips the group's status to `in_progress`.
+async function pickUpRider(req, res, next) {
   try {
     const { trip } = await loadDriverTrip(req);
     if (trip.status !== 'arriving') {
-      throw new HttpError(400, `Cannot start from status ${trip.status}`);
+      throw new HttpError(
+        400,
+        `Cannot mark picked up from status ${trip.status}`,
+      );
     }
-    const filter = tripScopeFilter(trip);
-    await Trip.updateMany(filter, { $set: { status: 'in_progress', startedAt: new Date() } });
+    const now = new Date();
+    trip.status = 'in_progress';
+    trip.startedAt = trip.startedAt || now;
+    await trip.save();
+
     if (trip.matchGroup) {
-      await MatchGroup.findByIdAndUpdate(trip.matchGroup, { $set: { status: 'in_progress' } });
+      // Promote the group to `in_progress` on the FIRST pickup so the
+      // rider-side UI can switch from "driver arriving" to "in cab".
+      // Subsequent pickups are no-ops at the group level.
+      await MatchGroup.updateOne(
+        { _id: trip.matchGroup, status: { $in: ['sealed', 'forming'] } },
+        { $set: { status: 'in_progress' } },
+      );
     }
-    const trips = await Trip.find(filter).populate('driver matchGroup');
+
+    await broadcastTripUpdate(trip);
+    const trips = await Trip.find(tripScopeFilter(trip))
+      .populate('driver matchGroup');
     res.json({ trips });
   } catch (err) {
     next(err);
   }
 }
 
-async function completeTrip(req, res, next) {
+// Per-rider dropoff. The driver hits this when they reach a specific
+// rider's destination. Advances ONLY this trip from `in_progress` →
+// `completed`, settles their fare, and pulls them from the driver's
+// activeTrips. When the LAST sibling's trip completes, the group
+// settles + the driver's totalRides counter increments (one drive,
+// one count, regardless of how many riders shared the cab).
+async function dropOffRider(req, res, next) {
   try {
     const { driver, trip } = await loadDriverTrip(req);
     if (trip.status !== 'in_progress') {
-      throw new HttpError(400, `Cannot complete from status ${trip.status}`);
+      throw new HttpError(
+        400,
+        `Cannot mark dropped from status ${trip.status}`,
+      );
     }
     const now = new Date();
 
-    let riderIds;
+    // Settle this rider's fare. Shared trips: per-rider share of the
+    // group fare (so the discount applies even if some siblings are
+    // still in-cab). Solo: the original estimate.
+    let fareFinal = trip.fareEstimate;
     if (trip.matchGroup) {
       const group = await MatchGroup.findById(trip.matchGroup).populate('trips');
-      const fare = estimateSharedFareForGroup(
-        group.trips.map((t) => ({
-          pickup: { lat: t.pickup.location.coordinates[1], lng: t.pickup.location.coordinates[0] },
-          dropoff: { lat: t.dropoff.location.coordinates[1], lng: t.dropoff.location.coordinates[0] },
-        })),
-      );
-      riderIds = group.trips.map((t) => t.rider);
-      await Trip.updateMany(
-        { matchGroup: trip.matchGroup },
-        { $set: { status: 'completed', completedAt: now, fareFinal: fare.perRider } },
-      );
-      group.status = 'completed';
-      await group.save();
-    } else {
-      riderIds = [trip.rider];
-      await Trip.updateOne(
-        { _id: trip._id },
-        { $set: { status: 'completed', completedAt: now, fareFinal: trip.fareEstimate } },
-      );
+      if (group && group.trips.length > 0) {
+        const fare = estimateSharedFareForGroup(
+          group.trips.map((t) => ({
+            pickup: {
+              lat: t.pickup.location.coordinates[1],
+              lng: t.pickup.location.coordinates[0],
+            },
+            dropoff: {
+              lat: t.dropoff.location.coordinates[1],
+              lng: t.dropoff.location.coordinates[0],
+            },
+          })),
+        );
+        fareFinal = fare.perRider;
+      }
     }
 
-    // Bump ride counters: each rider gets +1, the driver's user gets +1 (one drive).
-    await User.updateMany({ _id: { $in: riderIds } }, { $inc: { totalRides: 1 } });
-    await User.updateOne({ _id: driver.user }, { $inc: { totalRides: 1 } });
+    trip.status = 'completed';
+    trip.completedAt = now;
+    trip.fareFinal = fareFinal;
+    await trip.save();
 
+    // This rider is no longer in the cab — pull from activeTrips. We
+    // don't blow away the whole activeTrips list because siblings may
+    // still be in-cab (and the driver-home dispatch card needs them).
     await Driver.updateOne(
       { _id: driver._id },
-      { $set: { activeTrips: [] } },
+      { $pull: { activeTrips: trip._id } },
     );
+    // Bump THIS rider's count immediately; their journey is done.
+    await User.updateOne({ _id: trip.rider }, { $inc: { totalRides: 1 } });
 
-    const trips = await Trip.find(tripScopeFilter(trip)).populate('driver matchGroup');
+    if (trip.matchGroup) {
+      const group = await MatchGroup.findById(trip.matchGroup).populate('trips');
+      const allDone = group.trips.every((t) => t.status === 'completed');
+      if (allDone) {
+        group.status = 'completed';
+        await group.save();
+        // One drive = +1 to the driver's counter, regardless of rider count.
+        await User.updateOne({ _id: driver.user }, { $inc: { totalRides: 1 } });
+      }
+    } else {
+      // Solo dispatch — driver's drive ends with this single dropoff.
+      await User.updateOne({ _id: driver.user }, { $inc: { totalRides: 1 } });
+    }
+
+    await broadcastTripUpdate(trip);
+    const trips = await Trip.find(tripScopeFilter(trip))
+      .populate('driver matchGroup');
     res.json({ trips });
   } catch (err) {
     next(err);
@@ -439,6 +489,6 @@ module.exports = {
   cancelTrip,
   getGroupFare,
   arriveTrip,
-  startTrip,
-  completeTrip,
+  pickUpRider,
+  dropOffRider,
 };
