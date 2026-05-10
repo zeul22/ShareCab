@@ -1,12 +1,16 @@
 import { ReactNode } from 'react';
 
 export function Section({
+  id,
   eyebrow,
   title,
   intro,
   children,
   alt,
 }: {
+  // Optional anchor target so in-page links (e.g. /drivers#economics) jump
+  // straight to the section. Rendered on the outer <section> tag.
+  id?: string;
   eyebrow?: string;
   title: string;
   intro?: string;
@@ -14,7 +18,7 @@ export function Section({
   alt?: boolean;
 }) {
   return (
-    <section className={alt ? 'section bg-brand-50/40' : 'section'}>
+    <section id={id} className={alt ? 'section bg-brand-50/40' : 'section'}>
       <div className="container-page">
         <div className="max-w-2xl">
           {eyebrow && (

@@ -4,24 +4,32 @@ export const metadata = { title: 'How it works — ShareCab' };
 
 const steps = [
   {
-    title: 'Set your destination',
-    text: 'Open the app, pick your pickup point and destination. Toggle “share to save” on (it’s on by default).',
+    title: 'Sign in with OTP',
+    text: 'One-time SMS OTP — no passwords, no anonymous accounts. New phones auto-create a rider profile on first verify.',
   },
   {
-    title: 'We find a match nearby',
-    text: 'Our matching engine looks for riders whose destinations are within 2–4 km of yours and pickups within 2 km.',
+    title: 'Set pickup, drop, and luggage',
+    text: 'Pick your pickup point and destination on the map. Tell us how much luggage you have so we don’t pair you with riders whose bags won’t fit.',
   },
   {
-    title: 'Driver comes to both of you',
-    text: 'A nearby driver picks you up first, then your co-rider — or both of you at the same point.',
+    title: 'Unlock matching',
+    text: 'Watch 2 short rewarded ads, OR pay a small one-shot unlock fee. That’s how shared rides stay free of per-trip commission — drivers keep more, riders pay less.',
   },
   {
-    title: 'Pay only your share',
-    text: 'You pay only your part of the discounted fare. Drivers earn the same — we just route smarter.',
+    title: 'Confirm your match in 60 seconds',
+    text: 'See your co-rider’s first name, rating, and detour cost. A draining timer shows how long you have to confirm or reject. If you don’t act, we auto-reject — no surprise commitments.',
   },
   {
-    title: 'Rate the ride',
-    text: 'After drop, rate your driver and your co-rider. Two-way ratings keep ShareCab safe and friendly.',
+    title: 'Driver picks you both up',
+    text: 'The map shows the actual driving path through every stop in order — not a straight line. Chat with your co-rider in-app to coordinate the exact pickup spot, no phone numbers exchanged.',
+  },
+  {
+    title: 'Driver confirms each drop',
+    text: 'When the driver reaches your destination, their app auto-detects arrival within 80m and they confirm the drop with one tap. Your trip ends — you don’t have to remember to press anything.',
+  },
+  {
+    title: 'Pay your share, rate the ride',
+    text: 'You pay only your part of the discounted fare. Then rate the driver and your co-rider. Two-way ratings keep ShareCab safe and friendly.',
   },
 ];
 
@@ -31,11 +39,11 @@ export default function HowItWorksPage() {
       <section className="container-page pt-20 pb-6">
         <h1 className="h-display max-w-3xl">How ShareCab works</h1>
         <p className="mt-6 text-lg muted max-w-2xl">
-          Five simple steps from booking to drop. No complicated rules. No surprises.
+          Seven steps from sign-in to drop. No complicated rules. No surprises.
         </p>
       </section>
 
-      <Section eyebrow="The flow" title="Five simple steps.">
+      <Section eyebrow="The flow" title="From sign-in to drop, in seven steps.">
         <ol className="space-y-5">
           {steps.map((s, i) => (
             <li key={s.title} className="flex gap-5 rounded-2xl border border-ink-300/40 bg-white p-6">

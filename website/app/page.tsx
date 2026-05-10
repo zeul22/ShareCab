@@ -62,39 +62,54 @@ export default function HomePage() {
       {/* Why */}
       <Section
         eyebrow="Why ShareCab"
-        title="Designed for short city trips."
-        intro="Most cab rides are under 8 km. Our matching is tuned for this — quick, nearby, and almost always shareable."
+        title="Built end-to-end for shared short trips."
+        intro="Most cab rides are under 8 km. Every screen, every API call, every minute of the ride is optimised for shorter, shared journeys."
       >
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <FeatureCard
             icon="₹"
             title="Save on every trip"
-            description="Riders heading near you split the fare. Typical savings range from 25–40% on short trips."
+            description="Co-riders split the fare with a 30% group discount. Solo trips stay at the regular price — no gotchas."
           />
           <FeatureCard
             icon="◎"
             title="Smart 2–4 km matching"
-            description="We pair pickups within 2 km and drops within 4 km — you barely detour, but you save a lot."
+            description="Pickups within 2 km and drops within 4 km of each other. You barely detour, but you save a lot."
           />
           <FeatureCard
-            icon="⌛"
-            title="Quick to match"
-            description="Most rides match in under a minute. If we can't find a co-rider, you ride solo at the regular price."
+            icon="⏱"
+            title="60-second match window"
+            description="A draining timer shows how long you have to confirm or reject your match. No surprise commitments."
+          />
+          <FeatureCard
+            icon="🛣"
+            title="Real road-following routes"
+            description="The map shows the actual driving path with every pickup and drop in order — not a rough straight line."
+          />
+          <FeatureCard
+            icon="📍"
+            title="Driver-confirmed arrivals"
+            description="Your driver presses a button when they reach your drop — you don't have to remember to. We auto-detect arrival within 80m."
+          />
+          <FeatureCard
+            icon="💬"
+            title="In-app chat with co-riders"
+            description="Coordinate pickup spots and small details with your matched co-rider — without ever sharing phone numbers."
           />
           <FeatureCard
             icon="✓"
-            title="Verified drivers"
-            description="All ShareCab drivers are background-verified, with vehicle and license checks."
+            title="Phone-verified, OTP-secured"
+            description="Every rider authenticates with a real OTP via MSG91 — no anonymous accounts, no shared logins."
           />
           <FeatureCard
             icon="◷"
-            title="Live tracking"
-            description="Watch your cab in real time. Share your trip with friends and family in one tap."
+            title="Live tracking + SOS"
+            description="Watch your cab in real time. One-tap SOS pings emergency contacts and our 24/7 support team."
           />
           <FeatureCard
             icon="★"
             title="Two-way ratings"
-            description="Riders and drivers rate every trip. Bad actors don't last on the platform."
+            description="Riders rate drivers, drivers rate riders, co-riders rate each other. Below-threshold accounts lose access."
           />
         </div>
       </Section>
