@@ -2,6 +2,7 @@ const { z } = require('zod');
 const Unlock = require('../models/Unlock');
 const User = require('../models/User');
 const env = require('../config/env');
+const razorpay = require('../services/razorpayClient');
 const { HttpError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -71,17 +72,29 @@ async function createAdRewardUnlock(req, res, next) {
 
 const paymentSchema = z.object({
   riderId: z.string(),
-  externalRef: z.string(), // razorpay payment_id
+  // razorpay_order_id from the order we created earlier (paymentSchema's
+  // `externalRef` previously aliased this to the payment_id; we keep both
+  // explicit for signature verification).
+  orderId: z.string().optional(),
+  externalRef: z.string(), // razorpay_payment_id
   amountPaise: z.number().int().positive(),
+  signature: z.string().optional(), // razorpay_signature; required in prod
 });
 
 async function createPaymentUnlock(req, res, next) {
   try {
-    // TODO(razorpay-webhook): replace stub with real Razorpay webhook handler.
-    //   - Verify X-Razorpay-Signature HMAC against the raw request body
-    //   - Look up internal order by razorpay_order_id; reject if already credited
-    //   - Confirm amountPaise == env.unlock.pricePaise (no over/underpay surprise)
     const data = paymentSchema.parse(req.body);
+
+    // Verify the checkout signature when provided + keys configured. Stub
+    // mode (no keys) passes through with a warning so the demo still works.
+    if (data.orderId) {
+      const ok = razorpay.verifyPaymentSignature({
+        orderId: data.orderId,
+        paymentId: data.externalRef,
+        signature: data.signature || '',
+      });
+      if (!ok) throw new HttpError(401, 'Invalid Razorpay signature');
+    }
 
     if (data.amountPaise < env.unlock.pricePaise) {
       throw new HttpError(

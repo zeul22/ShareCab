@@ -1,21 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 
 import 'routes.dart';
 import 'services/api/auth_api.dart';
+import 'services/api/driver_api.dart';
 import 'services/api/http_auth_api.dart';
 import 'services/api/http_ride_api.dart';
+import 'services/api/msg91_auth_api.dart';
 import 'services/api/ride_api.dart';
 import 'services/auth_service.dart';
 import 'services/location_service.dart';
 import 'services/notification_service.dart';
 import 'services/ride_flow.dart';
 import 'theme/app_theme.dart';
+import 'utils/api_config.dart';
 import 'widgets/ride_flow_banner.dart';
 
 import 'screens/airport_arrival_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/destination_screen.dart';
+import 'screens/driver_active_trip_screen.dart';
+import 'screens/driver_home_screen.dart';
 import 'screens/help_safety_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/luggage_screen.dart';
@@ -40,6 +46,18 @@ Future<void> main() async {
   // Best-effort: notification init is wrapped in try/catch so a failed
   // permission grant or unavailable channel doesn't block app launch.
   await NotificationService.instance.init();
+  // MSG91 OTP widget init. Only initialize when both credentials are
+  // configured via --dart-define; otherwise the app falls back to the
+  // dev-OTP path so local builds work without a real account.
+  if (ApiConfig.msg91Enabled) {
+    OTPWidget.initializeWidget(
+      ApiConfig.msg91WidgetId,
+      ApiConfig.msg91TokenAuth,
+    );
+  }
+  // Print which auth path is engaged so a silent fallback to dev-OTP
+  // is impossible to miss while debugging.
+  debugPrint('[auth] ${ApiConfig.msg91DiagnosticSummary}');
   runApp(const ShareCabApp());
 }
 
@@ -73,12 +91,26 @@ class ShareCabApp extends StatelessWidget {
     // Live API bindings — talk to the ShareCab backend at ApiConfig.apiRoot.
     // AuthService is built before RideApi so the latter can borrow the
     // token getter and the current rider's id (needed for unlock minting).
-    final AuthApi authApi = HttpAuthApi();
+    //
+    // MSG91 wiring: when widgetId + tokenAuth are configured, the OTP
+    // send/verify happens client-side via the MSG91 SDK and the resulting
+    // access token is exchanged at our backend's /auth/otp/msg91/verify.
+    // Refresh + logout still go through HttpAuthApi (delegated by
+    // Msg91AuthApi). Without credentials we fall back to HttpAuthApi's
+    // dev-OTP path so local demos keep working.
+    final AuthApi authApi = ApiConfig.msg91Enabled
+        ? Msg91AuthApi()
+        : HttpAuthApi();
     final authService = AuthService(authApi);
     final RideApi rideApi = HttpRideApi(
       tokenGetter: authService.accessTokenForApi,
       riderIdGetter: () => authService.user?.id,
     );
+    // DriverApi piggy-backs on the same auth session — its tokenGetter
+    // hands out the rider/driver-agnostic access token. Provided at the
+    // root so DriverHomeScreen + future driver-side screens share one
+    // instance (and therefore one underlying http.Client).
+    final driverApi = DriverApi(tokenGetter: authService.accessTokenForApi);
 
     // Navigator key + route observer power the global RideFlowBanner: the
     // banner sits above the Navigator in the widget tree (so it can overlay
@@ -91,6 +123,7 @@ class ShareCabApp extends StatelessWidget {
       providers: [
         Provider<AuthApi>.value(value: authApi),
         Provider<RideApi>.value(value: rideApi),
+        Provider<DriverApi>.value(value: driverApi),
         ChangeNotifierProvider<AuthService>.value(value: authService),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => RideFlowState(rideApi)),
@@ -127,6 +160,8 @@ class ShareCabApp extends StatelessWidget {
           Routes.otpVerify: (_) => const OtpVerifyScreen(),
 
           Routes.home: (_) => const HomeScreen(),
+          Routes.driverHome: (_) => const DriverHomeScreen(),
+          Routes.driverActiveTrip: (_) => const DriverActiveTripScreen(),
           Routes.profile: (_) => const ProfileScreen(),
           Routes.helpSafety: (_) => const HelpSafetyScreen(),
 

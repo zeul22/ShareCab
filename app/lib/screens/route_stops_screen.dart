@@ -3,6 +3,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../models/match_proposal.dart';
 import '../models/route_stop.dart';
+import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 
 /// Detailed view of the stop sequence for a proposal. Reached from the
@@ -22,10 +23,28 @@ class _RouteStopsScreenState extends State<RouteStopsScreen> {
   GoogleMapController? _map;
   MatchProposal? _proposal;
 
+  // Road-following polyline from Directions API. Null until fetched —
+  // we render the straight-line stop sequence as a placeholder so the
+  // map always has a route drawn while the API call is in flight.
+  List<LatLng>? _roadPoints;
+  bool _routeRequested = false;
+
   @override
   void dispose() {
     _map?.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchRoute(MatchProposal proposal) async {
+    if (_routeRequested) return;
+    _routeRequested = true;
+    final stops = proposal.stops
+        .map((s) => LatLng(s.place.lat, s.place.lng))
+        .toList(growable: false);
+    if (stops.length < 2) return;
+    final road = await RouteService.instance.routeThrough(stops);
+    if (!mounted) return;
+    setState(() => _roadPoints = road);
   }
 
   /// Auto-fit the camera to show every stop with a comfortable margin.
@@ -70,24 +89,41 @@ class _RouteStopsScreenState extends State<RouteStopsScreen> {
     _proposal ??= ModalRoute.of(context)!.settings.arguments as MatchProposal;
     final proposal = _proposal!;
 
+    // Kick off the Directions fetch once per screen lifetime. Deferred to
+    // a post-frame callback so we don't setState during build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _fetchRoute(proposal);
+    });
+
     final markers = <Marker>{
       for (var i = 0; i < proposal.stops.length; i++)
         _markerForStop(proposal.stops[i], i),
     };
+
+    final stopPoints = [
+      for (final s in proposal.stops) LatLng(s.place.lat, s.place.lng),
+    ];
+    // Use road-following points when the Directions call has returned;
+    // otherwise show the straight-line placeholder so the map's never
+    // empty while the network call is in flight.
+    final polylinePoints = _roadPoints ?? stopPoints;
 
     final polylines = proposal.stops.length < 2
         ? const <Polyline>{}
         : <Polyline>{
             Polyline(
               polylineId: const PolylineId('route'),
-              points: [
-                for (final s in proposal.stops) LatLng(s.place.lat, s.place.lng),
-              ],
+              points: polylinePoints,
               color: AppTheme.brand,
               width: 4,
-              // Patterned line so it reads as "rough sequence", not "real road
-              // route" — we don't have a routing engine wired up yet.
-              patterns: [PatternItem.dash(20), PatternItem.gap(8)],
+              // Solid once we have a real road route; dashed while we're
+              // still showing the straight-line placeholder, so the user
+              // can tell at a glance whether it's a rough sequence or
+              // the actual driving path.
+              patterns: _roadPoints != null
+                  ? const []
+                  : [PatternItem.dash(20), PatternItem.gap(8)],
             ),
           };
 

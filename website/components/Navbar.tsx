@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { env, hasAppLinks } from '@/lib/env';
 import { MobileNav } from './MobileNav';
@@ -21,12 +22,19 @@ export function Navbar() {
       <div className="container-page flex h-16 items-center justify-between">
         <Link
           href="/"
-          className="flex items-center gap-2 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-400"
+          aria-label="ShareCab home"
+          className="flex items-center rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-400"
         >
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-bold">
-            S
-          </span>
-          <span className="text-lg font-semibold tracking-tight">ShareCab</span>
+          {/* Aspect ratio of the asset is ~3:1 (3624×1184); width auto-derives
+              from the height so we get a sharp wordmark on every viewport. */}
+          <Image
+            src="/sharecab-logo.png"
+            alt="ShareCab"
+            width={147}
+            height={48}
+            priority
+            className="h-9 w-auto"
+          />
         </Link>
 
         <nav className="hidden md:flex items-center gap-7 text-sm">

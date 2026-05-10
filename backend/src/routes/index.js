@@ -7,5 +7,6 @@ router.use('/trips', require('./trip.routes'));
 router.use('/ratings', require('./rating.routes'));
 router.use('/unlocks', require('./unlock.routes'));
 router.use('/chats', require('./chat.routes'));
+router.use('/payments', require('./payment.routes'));
 
 module.exports = router;

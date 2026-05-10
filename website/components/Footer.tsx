@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import { AppStoreButtons } from './AppStoreButtons';
 import { env } from '@/lib/env';
@@ -7,12 +8,13 @@ export function Footer() {
     <footer className="border-t border-ink-300/30 bg-brand-50/40">
       <div className="container-page py-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-bold">
-              S
-            </span>
-            <span className="text-lg font-semibold tracking-tight">{env.siteName}</span>
-          </div>
+          <Image
+            src="/sharecab-logo.png"
+            alt={env.siteName}
+            width={147}
+            height={48}
+            className="h-9 w-auto"
+          />
           <p className="mt-3 text-sm muted max-w-xs">
             Share the cab. Split the fare. Get there together.
           </p>
