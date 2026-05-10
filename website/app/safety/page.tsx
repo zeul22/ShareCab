@@ -38,8 +38,13 @@ export default function SafetyPage() {
           />
           <FeatureCard
             icon="◎"
-            title="Verified co-riders"
-            description="Co-riders are phone-verified and tied to a real account. No anonymous shares."
+            title="Phone-verified accounts"
+            description="Every rider signs in with a real OTP via MSG91. No anonymous accounts, no shared logins, no fake numbers."
+          />
+          <FeatureCard
+            icon="💬"
+            title="In-app chat, no numbers"
+            description="Coordinate the pickup spot with your co-rider through the app. Phone numbers stay private to both sides."
           />
           <FeatureCard
             icon="?"
@@ -53,7 +58,7 @@ export default function SafetyPage() {
         alt
         eyebrow="Privacy"
         title="Your details stay yours."
-        intro="Co-riders see only your first name and rating — never your phone number, address, or last name. We mask numbers on calls."
+        intro="Co-riders see only your first name and rating — never your phone number, address, or last name. The in-app chat is wiped automatically when the group composition changes (someone joins or leaves), so no leftover messages from a stranger."
       />
     </>
   );
