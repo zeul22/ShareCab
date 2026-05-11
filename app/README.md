@@ -41,6 +41,11 @@ flutter run \
 # iOS simulator? Use http://localhost:4000 for the API.
 ```
 
+For MSG91 production OTP, either pass `MSG91_WIDGET_ID` and
+`MSG91_WIDGET_AUTH_TOKEN` as dart-defines or configure them on the backend;
+the app will fetch backend-provided widget config from
+`/api/auth/otp/msg91/config` at startup.
+
 The app's matching is **fully mocked** — you don't need the backend to demo the booking flow.
 
 ### Run from the repo root (VS Code)
@@ -129,8 +134,8 @@ All models live in [`lib/models/`](lib/models). They are intentionally framework
 
 Phone + OTP only — no passwords. Once a user verifies their phone, they're "logged in forever":
 
-1. **Request OTP** → server (or `MockAuthApi`) sends a 6-digit code.
-2. **Verify OTP** → server returns `{ accessToken, refreshToken, user }`. Both tokens + user are persisted as one blob in `SharedPreferences`.
+1. **Request OTP** → `Msg91AuthApi` calls the MSG91 Flutter widget SDK (`sendOTP`) when widget credentials are configured via dart-defines or backend public config; local dev can still use the backend `DEV_OTP` path.
+2. **Verify OTP** → `Msg91AuthApi` calls the widget SDK (`verifyOTP`), sends the returned access token to the backend, and receives `{ accessToken, refreshToken, user }`. Both tokens + user are persisted as one blob in `SharedPreferences`.
 3. **Access token** is short-lived (15 min). Every API call goes through `AuthService.accessTokenForApi()` which refreshes silently if expired.
 4. **Refresh token rotates on every use** — each refresh issues a new pair and revokes the old one. A stolen refresh token only works until the legitimate device next refreshes.
 5. **Bootstrap on launch** — if the persisted access token is expired, `AuthService.bootstrap()` refreshes silently. If refresh fails, local state clears and the user lands on the phone-entry screen.
@@ -141,6 +146,7 @@ Net effect: users sign in once and stay signed in indefinitely, while every indi
 Files:
 - [`lib/models/auth_session.dart`](lib/models/auth_session.dart) — token + user blob
 - [`lib/services/api/auth_api.dart`](lib/services/api/auth_api.dart) — interface
+- [`lib/services/api/msg91_auth_api.dart`](lib/services/api/msg91_auth_api.dart) — MSG91 widget integration
 - [`lib/services/api/mock_auth_api.dart`](lib/services/api/mock_auth_api.dart) — demo impl
 - [`lib/services/auth_service.dart`](lib/services/auth_service.dart) — token store + auto-refresh
 

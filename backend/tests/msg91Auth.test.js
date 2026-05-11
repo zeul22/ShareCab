@@ -18,15 +18,17 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 
 const User = require('../src/models/User');
 const authCtrl = require('../src/controllers/authController');
-// Direct handle on the cached env so individual tests can flip the
-// template id without re-requiring the module tree.
+// Direct handle on the cached env so individual tests can flip dev mode
+// without re-requiring the module tree.
 const env = require('../src/config/env');
 
 function makeRes() {
   return {
     statusCode: 200,
+    headers: {},
     body: undefined,
     status(c) { this.statusCode = c; return this; },
+    set(k, v) { this.headers[k] = v; return this; },
     json(p) { this.body = p; return this; },
   };
 }
@@ -54,6 +56,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await User.deleteMany({});
+  env.msg91.devFallback = false;
+  env.msg91.widgetId = '';
+  env.msg91.widgetAuthToken = '';
   originalFetch = global.fetch;
 });
 
@@ -70,6 +75,28 @@ function mockMsg91({ ok, type }) {
 }
 
 describe('verifyMsg91Otp', () => {
+  test('returns public widget config when backend env provides it', async () => {
+    env.msg91.widgetId = 'widget_123';
+    env.msg91.widgetAuthToken = 'public_widget_token';
+
+    const r = await call(authCtrl.getMsg91WidgetConfig, { body: {} });
+
+    expect(r.err).toBeUndefined();
+    expect(r.res.headers['Cache-Control']).toBe('no-store');
+    expect(r.res.body).toEqual({
+      enabled: true,
+      widgetId: 'widget_123',
+      authToken: 'public_widget_token',
+    });
+  });
+
+  test('returns disabled widget config when public widget env is missing', async () => {
+    const r = await call(authCtrl.getMsg91WidgetConfig, { body: {} });
+
+    expect(r.err).toBeUndefined();
+    expect(r.res.body).toEqual({ enabled: false });
+  });
+
   test('valid token + new phone auto-creates user and issues session', async () => {
     mockMsg91({ ok: true, type: 'success' });
     const r = await call(authCtrl.verifyMsg91Otp, {
@@ -103,6 +130,33 @@ describe('verifyMsg91Otp', () => {
     expect(await User.countDocuments({ phone: '+919999222222' })).toBe(1);
   });
 
+  test('posts authkey + access-token to MSG91 verifyAccessToken', async () => {
+    let msg91Request;
+    global.fetch = async (url, opts) => {
+      msg91Request = { url, opts, body: JSON.parse(opts.body) };
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ type: 'success', message: 'verified' }),
+      };
+    };
+
+    const r = await call(authCtrl.verifyMsg91Otp, {
+      body: { phone: '+919999555555', accessToken: 'msg91.jwt.token' },
+    });
+    expect(r.err).toBeUndefined();
+    expect(msg91Request.url).toBe(env.msg91.verifyUrl);
+    expect(msg91Request.opts.method).toBe('POST');
+    expect(msg91Request.opts.headers).toEqual({
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    });
+    expect(msg91Request.body).toEqual({
+      authkey: env.msg91.authKey,
+      'access-token': 'msg91.jwt.token',
+    });
+  });
+
   test('rejected token returns 401 and does NOT create a user', async () => {
     mockMsg91({ ok: false, type: 'error' });
     const r = await call(authCtrl.verifyMsg91Otp, {
@@ -121,96 +175,46 @@ describe('verifyMsg91Otp', () => {
   });
 });
 
-describe('Server-side MSG91 OTP flow (the path /auth/otp/request takes)', () => {
-  // /auth/otp/request used to return the dev OTP unconditionally and we
-  // patched it to forbid that when MSG91 was configured. Now it goes one
-  // step further: it actually SENDS an OTP via MSG91. These tests pin
-  // the new behaviour with a mocked MSG91 endpoint so we don't hit the
-  // real API in CI.
-
-  test('requestOtp dispatches MSG91 sendOtp when configured', async () => {
-    env.msg91.templateId = 'TEMPLATE_TEST';
+describe('Legacy server OTP endpoints with MSG91 widget flow', () => {
+  test('requestOtp is dev-only and does not call MSG91', async () => {
     const calls = [];
-    global.fetch = async (url, opts) => {
-      calls.push({ url, opts });
+    global.fetch = async (...args) => {
+      calls.push(args);
       return {
         ok: true,
         status: 200,
-        text: async () =>
-          JSON.stringify({ type: 'success', request_id: 'req_42' }),
+        text: async () => JSON.stringify({ type: 'success' }),
       };
     };
 
-    const r = await call(authCtrl.requestOtp, {
-      body: { phone: '+919999666666' },
-    });
-    expect(r.err).toBeUndefined();
-    expect(r.res.body).toEqual({ requestId: 'req_42' });
-    // Must NOT leak the dev OTP back to the client when MSG91 is on.
-    expect(r.res.body.debugOtp).toBeUndefined();
-    // Sanity: we hit MSG91's send endpoint with template+mobile.
-    expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain('/api/v5/otp');
-    expect(calls[0].url).toContain('template_id=TEMPLATE_TEST');
-    expect(calls[0].url).toContain('mobile=919999666666');
-    env.msg91.templateId = '';
-  });
-
-  test('requestOtp surfaces MSG91 errors as 502', async () => {
-    env.msg91.templateId = 'TEMPLATE_TEST';
-    global.fetch = async () => ({
-      ok: false,
-      status: 400,
-      text: async () =>
-        JSON.stringify({ type: 'error', message: 'Invalid template id' }),
-    });
-    const r = await call(authCtrl.requestOtp, {
-      body: { phone: '+919999777777' },
-    });
-    expect(r.err).toBeDefined();
-    expect(r.err.status).toBe(502);
-    expect(r.err.message).toContain('Invalid template id');
-    env.msg91.templateId = '';
-  });
-
-  test('requestOtp returns 503 when MSG91_TEMPLATE_ID is missing', async () => {
-    env.msg91.templateId = '';
     const r = await call(authCtrl.requestOtp, {
       body: { phone: '+919999888888' },
     });
     expect(r.err).toBeDefined();
     expect(r.err.status).toBe(503);
+    expect(r.err.message).toContain('MSG91 Flutter widget SDK');
+    expect(calls).toHaveLength(0);
   });
 
-  test('verifyOtp delegates to MSG91 (not the dev OTP) when configured', async () => {
-    // Hardcoded dev OTP must NOT pass — only what MSG91 says is valid.
-    global.fetch = async () => ({
-      ok: false,
-      status: 401,
-      text: async () => JSON.stringify({ type: 'error', message: 'OTP not match' }),
-    });
+  test('verifyOtp is dev-only and does not accept the hardcoded OTP', async () => {
+    const calls = [];
+    global.fetch = async (...args) => {
+      calls.push(args);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ type: 'success' }),
+      };
+    };
+
     const r = await call(authCtrl.verifyOtp, {
       body: { phone: '+919999999999', otp: '123456' },
     });
     expect(r.err).toBeDefined();
-    expect(r.err.status).toBe(401);
+    expect(r.err.status).toBe(503);
+    expect(r.err.message).toContain('/auth/otp/msg91/verify');
+    expect(calls).toHaveLength(0);
     expect(await User.countDocuments({ phone: '+919999999999' })).toBe(0);
-  });
-
-  test('verifyOtp issues session when MSG91 confirms the OTP', async () => {
-    global.fetch = async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({ type: 'success', message: 'OTP verified' }),
-    });
-    const r = await call(authCtrl.verifyOtp, {
-      body: { phone: '+919998888888', otp: '424242' },
-    });
-    expect(r.err).toBeUndefined();
-    expect(r.res.body).toEqual(expect.objectContaining({
-      accessToken: expect.any(String),
-      user: expect.objectContaining({ phone: '+919998888888' }),
-    }));
   });
 });
 
@@ -266,4 +270,3 @@ describe('Dev OTP fallback (MSG91_DEV_FALLBACK=true)', () => {
     expect(r.err.status).toBe(401);
   });
 });
-

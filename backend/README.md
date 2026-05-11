@@ -100,6 +100,10 @@ See [.env.example](./.env.example) — every variable has a comment explaining i
 |---|---|
 | `MONGODB_URI` | Mongo connection string |
 | `JWT_SECRET` | Sign / verify auth tokens |
+| `MSG91_AUTH_KEY` | Server-side MSG91 authkey used to validate widget access tokens |
+| `MSG91_WIDGET_ID` | Public MSG91 widget id served to the Flutter app when dart-defines are absent |
+| `MSG91_WIDGET_AUTH_TOKEN` | Public MSG91 widget token served to the Flutter app; do not put `MSG91_AUTH_KEY` here |
+| `MSG91_DEV_FALLBACK` | Local-only OTP bypass; never enable in production |
 | `MATCH_DESTINATION_RADIUS_KM` | Max distance between two riders' destinations to count as "shareable" |
 | `MATCH_PICKUP_RADIUS_KM` | Max distance between pickups |
 | `MATCH_MAX_RIDERS_PER_CAB` | Cap on how many riders share one cab |

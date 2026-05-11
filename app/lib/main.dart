@@ -46,9 +46,10 @@ Future<void> main() async {
   // Best-effort: notification init is wrapped in try/catch so a failed
   // permission grant or unavailable channel doesn't block app launch.
   await NotificationService.instance.init();
-  // MSG91 OTP widget init. Only initialize when both credentials are
-  // configured via --dart-define; otherwise the app falls back to the
-  // dev-OTP path so local builds work without a real account.
+  // MSG91 OTP widget init. Credentials can come from --dart-define or
+  // the backend's public widget-config endpoint; otherwise the app falls
+  // back to the dev-OTP path so local builds work without a real account.
+  await ApiConfig.loadRuntimeMsg91Config();
   if (ApiConfig.msg91Enabled) {
     OTPWidget.initializeWidget(
       ApiConfig.msg91WidgetId,
@@ -98,9 +99,8 @@ class ShareCabApp extends StatelessWidget {
     // Refresh + logout still go through HttpAuthApi (delegated by
     // Msg91AuthApi). Without credentials we fall back to HttpAuthApi's
     // dev-OTP path so local demos keep working.
-    final AuthApi authApi = ApiConfig.msg91Enabled
-        ? Msg91AuthApi()
-        : HttpAuthApi();
+    final AuthApi authApi =
+        ApiConfig.msg91Enabled ? Msg91AuthApi() : HttpAuthApi();
     final authService = AuthService(authApi);
     final RideApi rideApi = HttpRideApi(
       tokenGetter: authService.accessTokenForApi,
@@ -155,16 +155,13 @@ class ShareCabApp extends StatelessWidget {
         initialRoute: Routes.splash,
         routes: {
           Routes.splash: (_) => const SplashScreen(),
-
           Routes.phoneEntry: (_) => const PhoneEntryScreen(),
           Routes.otpVerify: (_) => const OtpVerifyScreen(),
-
           Routes.home: (_) => const HomeScreen(),
           Routes.driverHome: (_) => const DriverHomeScreen(),
           Routes.driverActiveTrip: (_) => const DriverActiveTripScreen(),
           Routes.profile: (_) => const ProfileScreen(),
           Routes.helpSafety: (_) => const HelpSafetyScreen(),
-
           Routes.planRide: (_) => const DestinationScreen(),
           Routes.airportArrival: (_) => const AirportArrivalScreen(),
           Routes.luggage: (_) => const LuggageScreen(),
@@ -177,7 +174,6 @@ class ShareCabApp extends StatelessWidget {
           Routes.payment: (_) => const PaymentScreen(),
           Routes.rideCompleted: (_) => const RideCompletedScreen(),
           Routes.rating: (_) => const RatingScreen(),
-
           Routes.history: (_) => const RideHistoryScreen(),
         },
         // ChatScreen takes a required groupId, so it can't live in the

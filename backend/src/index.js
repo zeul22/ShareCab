@@ -27,16 +27,16 @@ async function start() {
         'OTP DEV FALLBACK enabled — /auth/otp/* returns 123456 for ANY phone. '
           + 'NEVER set MSG91_DEV_FALLBACK=true in production.',
       );
-    } else if (env.msg91.authKey && env.msg91.templateId) {
-      logger.info('MSG91 OTP configured (authKey + templateId present)');
+    } else if (env.msg91.authKey) {
+      const widgetConfig = env.msg91.widgetId && env.msg91.widgetAuthToken
+        ? ' + public widget config'
+        : '';
+      logger.info(`MSG91 OTP configured for widget access-token verification${widgetConfig}`);
     } else {
-      const missing = [
-        !env.msg91.authKey && 'MSG91_AUTH_KEY',
-        !env.msg91.templateId && 'MSG91_TEMPLATE_ID',
-      ].filter(Boolean).join(', ');
       logger.warn(
-        `MSG91 OTP NOT configured — /auth/otp/* will return 503. Missing in .env: ${missing}. `
-          + 'Set MSG91_DEV_FALLBACK=true to use the dev OTP while DLT is pending.',
+        'MSG91 OTP NOT configured — /auth/otp/msg91/verify will return 503. '
+          + 'Missing in .env: MSG91_AUTH_KEY. Set MSG91_DEV_FALLBACK=true '
+          + 'to use the dev OTP locally.',
       );
     }
   });

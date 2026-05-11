@@ -71,7 +71,8 @@ class Msg91AuthApi implements AuthApi {
   }
 
   @override
-  Future<AuthSession> verifyOtp({required String phone, required String otp}) async {
+  Future<AuthSession> verifyOtp(
+      {required String phone, required String otp}) async {
     final reqId = _lastReqId;
     if (reqId == null) {
       throw Exception('No OTP request in flight — request a fresh OTP first');
@@ -103,7 +104,8 @@ class Msg91AuthApi implements AuthApi {
     // issues our own session. Use the original `+91…` form for the
     // phone so the User document in Mongo stays consistent with the
     // dev-OTP path.
-    final session = await _exchangeAtBackend(phone: phone, accessToken: accessToken);
+    final session =
+        await _exchangeAtBackend(phone: phone, accessToken: accessToken);
     _lastReqId = null;
     return session;
   }
@@ -152,6 +154,8 @@ class Msg91AuthApi implements AuthApi {
     if (res == null) return null;
     final data = res['data'];
     if (data is Map && data['reqId'] is String) return data['reqId'] as String;
+    if (res['reqId'] is String) return res['reqId'] as String;
+    if (res['request_id'] is String) return res['request_id'] as String;
     final message = res['message'];
     if (message is Map && message['reqId'] is String) {
       return message['reqId'] as String;
@@ -176,15 +180,19 @@ class Msg91AuthApi implements AuthApi {
 
   String? _extractAccessToken(Map<String, dynamic>? res) {
     if (res == null) return null;
-    // MSG91's verify response carries the JWT in `message` (string) or
-    // `data.message` / `data.access_token` depending on widget version.
+    // MSG91's verify response may carry the JWT as `access-token`,
+    // `message`, or inside `data`, depending on widget version.
+    final directToken =
+        res['access-token'] ?? res['access_token'] ?? res['accessToken'];
+    if (directToken is String && directToken.isNotEmpty) return directToken;
     final direct = res['message'];
     if (direct is String && direct.isNotEmpty) return direct;
     final data = res['data'];
     if (data is Map) {
       final m = data['message'];
       if (m is String && m.isNotEmpty) return m;
-      final t = data['access_token'] ?? data['accessToken'];
+      final t =
+          data['access-token'] ?? data['access_token'] ?? data['accessToken'];
       if (t is String && t.isNotEmpty) return t;
     }
     return null;
@@ -194,7 +202,9 @@ class Msg91AuthApi implements AuthApi {
     final m = res?['message'];
     if (m is String && m.isNotEmpty) return m;
     final data = res?['data'];
-    if (data is Map && data['message'] is String) return data['message'] as String;
+    if (data is Map && data['message'] is String) {
+      return data['message'] as String;
+    }
     return fallback;
   }
 }

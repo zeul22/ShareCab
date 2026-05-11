@@ -101,43 +101,33 @@ async function me(req, res, next) {
 // =============================================================================
 // OTP-based auth — what the Flutter app uses for sign-in.
 //
-// Default: every request goes through MSG91 server-side. /otp/request
-// dispatches a real SMS, /otp/verify validates against MSG91.
+// Production: the Flutter app uses MSG91's widget SDK directly.
+// `sendOTP` and `verifyOTP` run on-device, then the app sends the
+// widget access token to /otp/msg91/verify for server-side validation.
 //
 // Dev fallback (opt-in only): set MSG91_DEV_FALLBACK=true in .env and
 // the endpoints skip MSG91 entirely — /otp/request returns the dev OTP,
-// /otp/verify accepts only that exact code. Useful while DLT is pending.
+// /otp/verify accepts only that exact code. Useful while widget setup is
+// pending.
 // PRODUCTION MUST NEVER ENABLE THIS — anyone hitting the API can log
 // in as any phone with `123456`.
 //
-// If neither MSG91 nor the dev fallback is configured, the endpoints
-// return 503 so the failure is loud rather than silent.
+// /otp/request and /otp/verify are therefore dev-only now. In production
+// they return 503 so a client cannot accidentally depend on a server-send
+// OTP path.
 // =============================================================================
 
 const DEV_OTP = process.env.DEV_OTP || '123456';
 
-function requireMsg91AuthKey() {
-  if (!env.msg91.authKey) {
-    throw new HttpError(
-      503,
-      'MSG91 OTP is not configured on the server. Set MSG91_AUTH_KEY in backend/.env, '
-        + 'or set MSG91_DEV_FALLBACK=true to use the dev OTP.',
-    );
-  }
-}
-
-// Sending an OTP additionally needs the DLT-registered template id;
-// verifying an existing OTP only needs the authkey, so we split the
-// guards. /otp/verify shouldn't 503 on a missing template id.
-function requireMsg91SendConfig() {
-  requireMsg91AuthKey();
-  if (!env.msg91.templateId) {
-    throw new HttpError(
-      503,
-      'MSG91 template id missing. Set MSG91_TEMPLATE_ID in backend/.env, '
-        + 'or set MSG91_DEV_FALLBACK=true to use the dev OTP.',
-    );
-  }
+function rejectServerOtpEndpoint() {
+  throw new HttpError(
+    503,
+    'Production OTP uses the MSG91 Flutter widget SDK. Configure '
+      + 'MSG91_WIDGET_ID and MSG91_WIDGET_AUTH_TOKEN via app dart-defines '
+      + 'or backend widget config, then exchange the widget access token '
+      + 'at /auth/otp/msg91/verify. Set MSG91_DEV_FALLBACK=true only for '
+      + 'local dev OTPs.',
+  );
 }
 
 const otpRequestSchema = z.object({
@@ -156,7 +146,7 @@ const refreshSchema = z.object({
 
 async function requestOtp(req, res, next) {
   try {
-    const { phone } = otpRequestSchema.parse(req.body);
+    otpRequestSchema.parse(req.body);
 
     // Dev fallback short-circuit. Skips MSG91 entirely and tells the
     // client what code to type. Only when MSG91_DEV_FALLBACK=true.
@@ -164,15 +154,7 @@ async function requestOtp(req, res, next) {
       return res.json({ debugOtp: DEV_OTP });
     }
 
-    requireMsg91SendConfig();
-    const result = await msg91.sendOtp({ mobile: phone });
-    if (!result.ok) {
-      throw new HttpError(
-        502,
-        `MSG91 sendOtp failed: ${result.message || result.reason || 'unknown error'}`,
-      );
-    }
-    res.json({ requestId: result.requestId });
+    rejectServerOtpEndpoint();
   } catch (err) {
     next(err);
   }
@@ -187,11 +169,7 @@ async function verifyOtp(req, res, next) {
       // requestOtp, so this whole flow stays local.
       if (otp !== DEV_OTP) throw new HttpError(401, 'Invalid OTP');
     } else {
-      requireMsg91AuthKey();
-      const result = await msg91.verifyOtp({ mobile: phone, otp });
-      if (!result.ok) {
-        throw new HttpError(401, result.message || 'Invalid OTP');
-      }
+      rejectServerOtpEndpoint();
     }
 
     let user = await User.findOne({ phone });
@@ -229,6 +207,23 @@ const msg91VerifySchema = z.object({
   phone: z.string().min(7),
   accessToken: z.string().min(8),
 });
+
+function getMsg91WidgetConfig(_req, res, next) {
+  try {
+    const enabled = Boolean(env.msg91.widgetId && env.msg91.widgetAuthToken);
+    res.set('Cache-Control', 'no-store');
+    if (!enabled) {
+      return res.json({ enabled: false });
+    }
+    return res.json({
+      enabled: true,
+      widgetId: env.msg91.widgetId,
+      authToken: env.msg91.widgetAuthToken,
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
 
 async function verifyMsg91Otp(req, res, next) {
   try {
@@ -303,6 +298,7 @@ module.exports = {
   me,
   requestOtp,
   verifyOtp,
+  getMsg91WidgetConfig,
   verifyMsg91Otp,
   refreshSession,
   logout,

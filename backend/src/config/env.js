@@ -34,18 +34,31 @@ const env = {
     shareDiscount: num(process.env.FARE_SHARE_DISCOUNT, 0.3),
   },
 
+  trip: {
+    // Distance sanity rails on every trip request. Pickup→drop straight
+    // line below `minDistanceKm` is nearly always a misclick or a same-
+    // address pair; above `maxDistanceKm` is intercity (not what
+    // ShareCab is for). Values are in kilometres.
+    minDistanceKm: num(process.env.TRIP_MIN_DISTANCE_KM, 0.3),
+    maxDistanceKm: num(process.env.TRIP_MAX_DISTANCE_KM, 100),
+  },
+
   msg91: {
-    // Server-side authkey used by the backend to talk to MSG91 (send
-    // OTP, verify OTP, validate widget access tokens). NEVER ship this
-    // in the Flutter app. Empty string makes /auth/otp/* return 503.
+    // Server-side authkey used by the backend to validate access tokens
+    // minted by the MSG91 Flutter widget. NEVER ship this in the app.
+    // Empty string makes /auth/otp/msg91/verify return 503.
     authKey: process.env.MSG91_AUTH_KEY || '',
-    // DLT-registered SMS template id with an `##OTP##` (or equivalent)
-    // placeholder. Required to send OTP via MSG91 — without it the
-    // sendOtp call refuses to fire and the controller returns 503 so
-    // the failure is loud, not silent.
-    templateId: process.env.MSG91_TEMPLATE_ID || '',
+    // Public widget credentials used by the Flutter SDK. These are
+    // client-side values by design, and may be served to the app through
+    // /api/auth/otp/msg91/config. Do not put MSG91_AUTH_KEY here.
+    widgetId: process.env.MSG91_WIDGET_ID || '',
+    widgetAuthToken:
+      process.env.MSG91_WIDGET_AUTH_TOKEN ||
+      process.env.MSG91_AUTH_TOKEN ||
+      process.env.MSG91_TOKEN_AUTH ||
+      '',
     // Explicit opt-in for the dev OTP (`123456`) while DLT registration
-    // is pending. When TRUE, /auth/otp/{request,verify} skip MSG91 and
+    // or widget setup is pending. When TRUE, /auth/otp/{request,verify}
     // run the local-only path. Production must NEVER set this — turning
     // it on lets anyone log in as any phone with the hardcoded code.
     devFallback: (process.env.MSG91_DEV_FALLBACK || '').toLowerCase() === 'true',

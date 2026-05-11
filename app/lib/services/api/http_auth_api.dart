@@ -7,8 +7,8 @@ import '../../models/user.dart';
 import '../../utils/api_config.dart';
 import 'auth_api.dart';
 
-/// HTTP implementation of [AuthApi] that talks to the ShareCab backend at
-/// `${ApiConfig.apiRoot}/auth/*`.
+/// Dev-fallback HTTP implementation of [AuthApi] that talks to the ShareCab
+/// backend at `${ApiConfig.apiRoot}/auth/*`.
 ///
 /// Endpoints (see backend/src/routes/auth.routes.js):
 ///   POST /api/auth/otp/request   — body {phone}             → {debugOtp}
@@ -16,8 +16,8 @@ import 'auth_api.dart';
 ///   POST /api/auth/refresh       — body {refreshToken}      → AuthSession
 ///   POST /api/auth/logout        — body {refreshToken}      → 204
 ///
-/// On the backend, the OTP path **auto-creates a rider** on first verify, so
-/// the app needs no separate signup screen.
+/// In production, phone login uses [Msg91AuthApi]. These endpoints are kept
+/// for local development with `MSG91_DEV_FALLBACK=true`.
 class HttpAuthApi implements AuthApi {
   final http.Client _client;
   final String _root;
@@ -34,7 +34,8 @@ class HttpAuthApi implements AuthApi {
   }
 
   @override
-  Future<AuthSession> verifyOtp({required String phone, required String otp}) async {
+  Future<AuthSession> verifyOtp(
+      {required String phone, required String otp}) async {
     final res = await _post('/auth/otp/verify', {'phone': phone, 'otp': otp});
     return _sessionFromJson(_decode(res));
   }
@@ -47,7 +48,8 @@ class HttpAuthApi implements AuthApi {
 
   @override
   Future<void> logout(String refreshToken) async {
-    await _post('/auth/logout', {'refreshToken': refreshToken}, expect204: true);
+    await _post('/auth/logout', {'refreshToken': refreshToken},
+        expect204: true);
   }
 
   // ---------------------------------------------------------------------------
