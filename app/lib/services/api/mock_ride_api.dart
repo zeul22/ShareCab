@@ -2,8 +2,10 @@ import 'dart:math';
 
 import '../../models/match_proposal.dart';
 import '../../models/payment.dart';
+import '../../models/recent_destination.dart';
 import '../../models/ride.dart';
 import '../../models/ride_search.dart';
+import '../../models/route_stop.dart';
 import '../matching/matching_engine.dart';
 import 'mock_data.dart';
 import 'ride_api.dart';
@@ -133,5 +135,76 @@ class MockRideApi implements RideApi {
   Future<List<Ride>> getRideHistory() async {
     await Future.delayed(_latency());
     return List.unmodifiable(_history);
+  }
+
+  @override
+  Future<List<RecentDestination>> getRecentDestinations({int limit = 5}) async {
+    await Future.delayed(_latency());
+    // Dedup by rounded lat/lng (mirrors the backend's 4-decimal bucket)
+    // and surface the most-recent entry per bucket with a frequency count.
+    // The rider's own drop is the stop with passengerId 'me' and
+    // kind == dropoff (see http_ride_api when it composes the proposal).
+    final buckets = <String, RecentDestination>{};
+    for (final ride in _history) {
+      RouteStop? drop;
+      for (final s in ride.proposal.stops) {
+        if (s.kind == StopKind.dropoff && s.passengerId == 'me') {
+          drop = s;
+          break;
+        }
+      }
+      // Fallback for older mock data that didn't tag the 'me' stop.
+      drop ??= ride.proposal.stops.lastWhere(
+        (s) => s.kind == StopKind.dropoff,
+        orElse: () => ride.proposal.stops.last,
+      );
+      final p = drop.place;
+      final key = '${p.lat.toStringAsFixed(4)},${p.lng.toStringAsFixed(4)}';
+      final existing = buckets[key];
+      buckets[key] = RecentDestination(
+        address: p.address,
+        lat: p.lat,
+        lng: p.lng,
+        lastUsedAt: ride.completedAt ?? ride.confirmedAt,
+        tripCount: (existing?.tripCount ?? 0) + 1,
+      );
+    }
+    final sorted = buckets.values.toList()
+      ..sort((a, b) => b.lastUsedAt.compareTo(a.lastUsedAt));
+    return sorted.take(limit.clamp(1, 20)).toList(growable: false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mock unlock flow — no-op success for all three. The mock backend
+  // doesn't actually gate matches behind unlocks, so the UI can show
+  // the full sheet flow without needing real ads or payment.
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<void> recordAdRewardForUnlock({required int adsCompleted}) async {
+    await Future.delayed(_latency());
+  }
+
+  @override
+  Future<void> recordPaymentForUnlock({
+    required int amountPaise,
+    String? orderId,
+    required String paymentRef,
+    String? signature,
+  }) async {
+    await Future.delayed(_latency());
+  }
+
+  @override
+  Future<void> unlockMatchForTrip(String tripId) async {
+    await Future.delayed(_latency());
+  }
+
+  @override
+  Future<void> closeRiderTrip(String tripId) async {
+    await Future.delayed(_latency());
+    // Mock impl: drop the now-closed trip from history so the rider's
+    // next session sees a clean slate. Real backend marks it completed.
+    _history.removeWhere((r) => r.id == tripId);
   }
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -73,7 +74,15 @@ class RouteService {
 
       // status is "OK" when Google returned a real route. Anything else
       // (REQUEST_DENIED, ZERO_RESULTS, OVER_QUERY_LIMIT) → straight line.
+      // Surface the failure to debugPrint so a flat dashed route on the
+      // ride screen isn't a silent mystery — the most common cause is
+      // "Directions API not enabled" on the Google Cloud project.
       if (result.status != 'OK' || result.points.isEmpty) {
+        debugPrint(
+          '[routes] Directions returned status=${result.status} '
+          'msg="${result.errorMessage ?? ''}" — falling back to straight line. '
+          'Enable the Directions API for your Google Cloud project key.',
+        );
         return stops;
       }
 
@@ -82,8 +91,9 @@ class RouteService {
           .toList(growable: false);
       _cache[fingerprint] = decoded;
       return decoded;
-    } catch (_) {
+    } catch (e) {
       // Network or parser error — never block rendering, fall back.
+      debugPrint('[routes] Directions request threw: $e — straight line.');
       return stops;
     }
   }

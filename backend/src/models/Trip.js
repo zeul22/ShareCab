@@ -47,6 +47,13 @@ const tripSchema = new mongoose.Schema(
     completedAt: { type: Date },
     cancelledAt: { type: Date },
     cancelReason: { type: String },
+
+    // Rider-only mode: timestamp at which this rider unlocked the
+    // matched-group reveal (paid or watched ads). Null while the match
+    // is still gated. The getTrip controller uses this to decide
+    // whether to populate co-rider details or return a redacted view.
+    // Unused in driver-dispatch mode (we leave it null).
+    matchRevealedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

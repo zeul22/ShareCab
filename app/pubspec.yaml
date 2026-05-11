@@ -32,6 +32,11 @@ dependencies:
   # `/auth/otp/msg91/verify` endpoint, which validates it via MSG91's
   # verify-access-token API and issues our own session.
   sendotp_flutter_sdk: ^0.0.2
+  # AdMob rewarded video — the "watch 2 ads to unlock matching" path.
+  # Single ad unit shown post-match (rider-only mode). Dev defaults
+  # to AdMob's official test ad unit IDs; production IDs come in via
+  # --dart-define so the binary itself stays test-friendly.
+  google_mobile_ads: ^5.2.0
 
 dev_dependencies:
   flutter_lints: ^4.0.0

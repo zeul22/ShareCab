@@ -28,6 +28,10 @@ class Routes {
   static const matchResult = '/match';
   static const routeStops = '/route-stops';
   static const rideConfirmation = '/confirm';
+  // Rider-only mode landing screen — used when there's no driver to
+  // dispatch. Replaces RideConfirmation + RideStatus while we're still
+  // bootstrapping driver supply.
+  static const riderCoordination = '/rider-coordination';
   static const chat = '/chat';
   static const liveRide = '/ride';
   static const payment = '/payment';

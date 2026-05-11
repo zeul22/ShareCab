@@ -97,6 +97,45 @@ describe('verifyMsg91Otp', () => {
     expect(r.res.body).toEqual({ enabled: false });
   });
 
+  test('returns disabled widget config when dev fallback is on, even with creds set', async () => {
+    // Whole point of dev fallback is "don't hit MSG91" — and the
+    // Flutter app uses the widget SDK on-device when this endpoint
+    // hands it creds, which would bypass the backend's request gate.
+    // So when devFallback is on we have to declare the widget off.
+    env.msg91.widgetId = 'widget_123';
+    env.msg91.widgetAuthToken = 'public_widget_token';
+    const original = env.msg91.devFallback;
+    env.msg91.devFallback = true;
+    try {
+      const r = await call(authCtrl.getMsg91WidgetConfig, { body: {} });
+      expect(r.err).toBeUndefined();
+      expect(r.res.body).toEqual({ enabled: false });
+    } finally {
+      env.msg91.devFallback = original;
+    }
+  });
+
+  test('verifyMsg91Otp returns 503 when dev fallback is on', async () => {
+    const original = env.msg91.devFallback;
+    env.msg91.devFallback = true;
+    let fetchCalls = 0;
+    global.fetch = async () => {
+      fetchCalls++;
+      return { ok: true, status: 200, text: async () => '' };
+    };
+    try {
+      const r = await call(authCtrl.verifyMsg91Otp, {
+        body: { phone: '+919999000111', accessToken: 'stale.cached.token' },
+      });
+      expect(r.err).toBeDefined();
+      expect(r.err.status).toBe(503);
+      // Critical: MSG91 must not have been called.
+      expect(fetchCalls).toBe(0);
+    } finally {
+      env.msg91.devFallback = original;
+    }
+  });
+
   test('valid token + new phone auto-creates user and issues session', async () => {
     mockMsg91({ ok: true, type: 'success' });
     const r = await call(authCtrl.verifyMsg91Otp, {

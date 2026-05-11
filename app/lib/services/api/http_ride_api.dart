@@ -8,6 +8,7 @@ import '../../models/match_proposal.dart';
 import '../../models/passenger.dart';
 import '../../models/payment.dart';
 import '../../models/place.dart';
+import '../../models/recent_destination.dart';
 import '../../models/ride.dart';
 import '../../models/ride_search.dart';
 import '../../models/route_stop.dart';
@@ -161,6 +162,65 @@ class HttpRideApi implements RideApi {
     return trips.map(_buildRideFromTrip).toList(growable: false);
   }
 
+  @override
+  Future<List<RecentDestination>> getRecentDestinations({int limit = 5}) async {
+    final res = await _get(
+      '/trips/destinations/recent?limit=$limit',
+      auth: true,
+    );
+    final body = _decode(res);
+    final arr = (body['destinations'] as List?) ?? const [];
+    return arr
+        .whereType<Map<String, dynamic>>()
+        .map(RecentDestination.fromJson)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> recordAdRewardForUnlock({required int adsCompleted}) async {
+    final riderId = _riderIdGetter();
+    if (riderId == null) {
+      throw Exception('Not signed in — cannot record ad reward');
+    }
+    await _post('/unlocks/ad-reward', {
+      'riderId': riderId,
+      'adsCompleted': adsCompleted,
+      // Per-attempt nonce so the eventual AdMob SSV path can dedupe.
+      // Today the backend doesn't store this, but it's cheap to send.
+      'externalRef': 'app-${DateTime.now().millisecondsSinceEpoch}',
+    });
+  }
+
+  @override
+  Future<void> recordPaymentForUnlock({
+    required int amountPaise,
+    String? orderId,
+    required String paymentRef,
+    String? signature,
+  }) async {
+    final riderId = _riderIdGetter();
+    if (riderId == null) {
+      throw Exception('Not signed in — cannot record payment');
+    }
+    await _post('/unlocks/payment-confirm', {
+      'riderId': riderId,
+      if (orderId != null) 'orderId': orderId,
+      'externalRef': paymentRef,
+      'amountPaise': amountPaise,
+      if (signature != null) 'signature': signature,
+    });
+  }
+
+  @override
+  Future<void> unlockMatchForTrip(String tripId) async {
+    await _post('/trips/$tripId/unlock-match', const {}, auth: true);
+  }
+
+  @override
+  Future<void> closeRiderTrip(String tripId) async {
+    await _post('/trips/$tripId/rider-close', const {}, auth: true);
+  }
+
   // ---------------------------------------------------------------------------
   // HTTP helpers
   // ---------------------------------------------------------------------------
@@ -266,6 +326,11 @@ class HttpRideApi implements RideApi {
     final vehicleType = _vehicleTypeFromCapacity(driver?['vehicle']?['capacity'] as num?);
 
     final coPassengers = <Passenger>[];
+    // In rider-only mode the backend hides sibling details until the
+    // unlock is consumed — siblings come back as `{_id, status, redacted: true}`.
+    // We surface that to the UI via `gatedUnlock` so the MatchResultScreen
+    // can show the unlock sheet instead of placeholder names.
+    bool gatedUnlock = false;
 
     if (group != null) {
       // Backend deep-populates matchGroup.trips with each sibling's rider
@@ -277,6 +342,23 @@ class HttpRideApi implements RideApi {
         if (raw is! Map<String, dynamic>) continue; // bare id; unexpected
         final siblingId = raw['_id'] as String? ?? '';
         if (siblingId == tripId) continue; // skip ourselves
+
+        // Redaction signal — backend strips rider/pickup/dropoff and
+        // tags `redacted: true` when the unlock hasn't been consumed.
+        if (raw['redacted'] == true) {
+          gatedUnlock = true;
+          // Still record a placeholder passenger so the UI knows the
+          // count of co-riders without revealing identity.
+          coPassengers.add(Passenger(
+            id: siblingId.isNotEmpty ? siblingId : 'co_${coPassengers.length}',
+            firstName: 'Co-rider',
+            rating: 5.0,
+            pickup: search.pickup!,
+            dropoff: search.dropoff!,
+            luggage: LuggageProfile.empty,
+          ));
+          continue;
+        }
 
         // The rider field may be a populated user doc or a bare ObjectId
         // string depending on backend selection. Both are handled.
@@ -364,6 +446,7 @@ class HttpRideApi implements RideApi {
       durationMin: durationMin,
       luggageSeatsUsed: 0,
       luggageSeatsFree: vehicleType.luggageCapacity,
+      gatedUnlock: gatedUnlock,
     );
   }
 

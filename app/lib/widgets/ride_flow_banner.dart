@@ -100,6 +100,15 @@ class _RideFlowBannerState extends State<RideFlowBanner> {
   /// Decide which banner (if any) to render for the given flow state +
   /// current route. Returns null when no banner is appropriate.
   _BannerSpec? _bannerSpecFor(RideFlowState flow, String? currentRoute) {
+    // Chat + rider-coordination screens own their own bottom bar
+    // (text input / "close ride" CTA). The floating banner sits on
+    // top of those and covers them — suppress it on those routes
+    // regardless of which banner would have fired.
+    if (currentRoute == Routes.chat ||
+        currentRoute == Routes.riderCoordination) {
+      return null;
+    }
+
     // 1. Match landed but not yet confirmed → preempts everything else.
     if (flow.stage == FlowStage.proposing && flow.proposals.isNotEmpty) {
       if (currentRoute == Routes.matchResult ||

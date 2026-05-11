@@ -210,6 +210,16 @@ const msg91VerifySchema = z.object({
 
 function getMsg91WidgetConfig(_req, res, next) {
   try {
+    // Dev fallback hard-disables the widget. Without this check, the
+    // Flutter app would still get the widget creds via this endpoint,
+    // initialise the SDK on the device, and call MSG91 directly —
+    // completely bypassing the backend's /auth/otp/request short-
+    // circuit. The dev fallback would then only stop server-side
+    // calls, not client-side ones, which is the bug we're fixing.
+    if (env.msg91.devFallback) {
+      res.set('Cache-Control', 'no-store');
+      return res.json({ enabled: false });
+    }
     const enabled = Boolean(env.msg91.widgetId && env.msg91.widgetAuthToken);
     res.set('Cache-Control', 'no-store');
     if (!enabled) {
@@ -227,6 +237,18 @@ function getMsg91WidgetConfig(_req, res, next) {
 
 async function verifyMsg91Otp(req, res, next) {
   try {
+    // Dev fallback closes the widget verify path too — otherwise a
+    // stale Flutter client instance with a cached access token could
+    // still trigger a MSG91 verifyAccessToken call while we're trying
+    // to stay off their wire. Same flag, same reason as the config
+    // endpoint above.
+    if (env.msg91.devFallback) {
+      throw new HttpError(
+        503,
+        'MSG91 widget verify is disabled (MSG91_DEV_FALLBACK=true). ' +
+          'Use POST /auth/otp/verify with the dev OTP instead.',
+      );
+    }
     if (!env.msg91.authKey) {
       throw new HttpError(503, 'MSG91 auth is not configured on the server');
     }

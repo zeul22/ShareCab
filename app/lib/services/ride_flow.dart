@@ -339,6 +339,12 @@ class RideFlowState extends ChangeNotifier {
         startedAt: DateTime.now(),
       );
 
+      // Rider-only mode signal: the restored ride has no driver
+      // assigned. All non-terminal restores land on the coordination
+      // screen instead of the driver-tracking flow, so the rider
+      // returns to the same UI they left.
+      final isRiderOnly = ride.driver.id.isEmpty;
+
       // Map ride status → flow stage → resume route. Resume polling for
       // any non-terminal status so the banner / screens keep getting fresh
       // state (driver progress, completion events, co-rider drops, etc).
@@ -347,13 +353,15 @@ class RideFlowState extends ChangeNotifier {
           _stage = FlowStage.confirmed;
           startWatching();
           notifyListeners();
-          return Routes.rideConfirmation;
+          return isRiderOnly
+              ? Routes.riderCoordination
+              : Routes.rideConfirmation;
         case RideStatus.arriving:
         case RideStatus.inProgress:
           _stage = FlowStage.inRide;
           startWatching();
           notifyListeners();
-          return Routes.liveRide;
+          return isRiderOnly ? Routes.riderCoordination : Routes.liveRide;
         case RideStatus.completed:
           _stage = FlowStage.paying;
           notifyListeners();
@@ -590,6 +598,24 @@ class RideFlowState extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   Future<List<Ride>> loadHistory() => _api.getRideHistory();
+
+  /// Local-only reset after the trip has already been closed server-side
+  /// (e.g. by the rider-only coordination screen's "We're done" button).
+  /// Skips the best-effort backend cancel that [clear] does — we don't
+  /// want to reject a trip that's already in `completed` state.
+  void clearAfterClose() {
+    stopWatching();
+    _stage = FlowStage.idle;
+    _search = RideSearch(startedAt: DateTime.now());
+    _sessionId = null;
+    _proposals = const [];
+    _selectedProposal = null;
+    _activeRide = null;
+    _activePayment = null;
+    _error = null;
+    _searchStartedAt = null;
+    notifyListeners();
+  }
 
   /// Reset to idle. If there's a `requested` / `matched` trip still alive on
   /// the backend (user hit the X-button mid-search), best-effort cancel it

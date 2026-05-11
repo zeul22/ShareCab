@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/place.dart';
+import '../models/recent_destination.dart';
 import '../routes.dart';
+import '../services/api/ride_api.dart';
 import '../services/location_service.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
@@ -12,8 +14,47 @@ import 'map_picker_screen.dart';
 /// Step 1 of the booking flow: pick a pickup and a drop. Continues to the
 /// luggage step. The [RideFlowState] holds the selections so navigating back
 /// keeps them.
-class DestinationScreen extends StatelessWidget {
+///
+/// Surfaces a "Recent destinations" shortcut row above the map picker —
+/// tap a chip → drop is set + screen continues to the luggage step.
+/// Stateful only because the recents need a one-shot fetch on init.
+class DestinationScreen extends StatefulWidget {
   const DestinationScreen({super.key});
+
+  @override
+  State<DestinationScreen> createState() => _DestinationScreenState();
+}
+
+class _DestinationScreenState extends State<DestinationScreen> {
+  List<RecentDestination>? _recents;
+  bool _recentsLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // Defer to the first frame so context.read works.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadRecents());
+  }
+
+  Future<void> _loadRecents() async {
+    try {
+      final list = await context.read<RideApi>().getRecentDestinations();
+      if (!mounted) return;
+      setState(() {
+        _recents = list;
+        _recentsLoading = false;
+      });
+    } catch (_) {
+      // Soft-fail: a recents fetch shouldn't block the screen. Empty
+      // state hides the section so the rider can still use the map
+      // picker as usual.
+      if (!mounted) return;
+      setState(() {
+        _recents = const [];
+        _recentsLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +68,10 @@ class DestinationScreen extends StatelessWidget {
     final tripError = TripConstraints.validate(pickup, dropoff);
 
     Future<void> pick({required bool isPickup}) async {
+      // Capture before the await so the analyzer is happy about the
+      // BuildContext-across-async-gap warning — the State is also
+      // gated by `mounted` below.
+      final rideFlow = context.read<RideFlowState>();
       final picked = await Navigator.of(context).push<Place>(
         MaterialPageRoute(
           builder: (_) => MapPickerScreen(
@@ -35,12 +80,19 @@ class DestinationScreen extends StatelessWidget {
           ),
         ),
       );
-      if (picked == null || !context.mounted) return;
+      if (picked == null || !mounted) return;
       if (isPickup) {
-        context.read<RideFlowState>().setPickup(picked);
+        rideFlow.setPickup(picked);
       } else {
-        context.read<RideFlowState>().setDropoff(picked);
+        rideFlow.setDropoff(picked);
       }
+    }
+
+    /// Tap a recent → set as drop, advance to luggage step. Skipping the
+    /// map picker is the whole point of this shortcut.
+    void useRecent(RecentDestination r) {
+      context.read<RideFlowState>().setDropoff(r.toPlace());
+      Navigator.of(context).pushNamed(Routes.luggage);
     }
 
     return Scaffold(
@@ -92,6 +144,16 @@ class DestinationScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 _TripErrorBanner(message: tripError),
               ],
+              // Recents shortcut — only renders once fetched + non-empty.
+              // First-time riders never see this section, so we don't
+              // burn screen real estate on an empty state.
+              if (!_recentsLoading && _recents != null && _recents!.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                _RecentDestinationsSection(
+                  recents: _recents!,
+                  onTap: useRecent,
+                ),
+              ],
               const SizedBox(height: 24),
             ],
           ),
@@ -115,6 +177,122 @@ class DestinationScreen extends StatelessWidget {
                 'You can change pickup or destination any time before you accept a match.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.black45, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Recent destinations" shortcut. Each row is a tap-target that sets
+/// the dropoff and advances the flow straight to the luggage step —
+/// no map picker needed. Repeat trips ("home", "office") collapse
+/// server-side so the list stays short.
+class _RecentDestinationsSection extends StatelessWidget {
+  final List<RecentDestination> recents;
+  final ValueChanged<RecentDestination> onTap;
+  const _RecentDestinationsSection({
+    required this.recents,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 4),
+          child: Text(
+            'Recent destinations',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+              color: Colors.black54,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        for (var i = 0; i < recents.length; i++) ...[
+          _RecentRow(recent: recents[i], onTap: () => onTap(recents[i])),
+          if (i < recents.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _RecentRow extends StatelessWidget {
+  final RecentDestination recent;
+  final VoidCallback onTap;
+  const _RecentRow({required this.recent, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final address = recent.address.isNotEmpty
+        ? recent.address
+        : '${recent.lat.toStringAsFixed(4)}, ${recent.lng.toStringAsFixed(4)}';
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF4F6F7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.brandLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.history,
+                  size: 18,
+                  color: AppTheme.brandDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      address,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                    if (recent.tripCount > 1) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '${recent.tripCount} trips',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right,
+                color: Colors.black38,
               ),
             ],
           ),
