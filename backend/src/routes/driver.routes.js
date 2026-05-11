@@ -9,14 +9,27 @@ const {
   getMySubscription,
   startSubscriptionOrder,
   confirmSubscription,
+  onboardDriver,
 } = require('../controllers/driverController');
+
+// Driver-app onboarding wizard target. Requires a valid session but NOT
+// the 'driver' role — at this point the user is still a rider promoting
+// themselves. The controller flips role + creates the Driver doc.
+router.post('/onboard', requireAuth, onboardDriver);
 
 router.post('/online', requireAuth, requireRole('driver'), setOnline);
 router.post('/offline', requireAuth, requireRole('driver'), setOffline);
 router.post('/location', requireAuth, requireRole('driver'), updateLocation);
 
-// One-shot snapshot for the driver-home screen.
-router.get('/me', requireAuth, requireRole('driver'), getMyDriver);
+// One-shot snapshot for the driver-home screen. NOT role-gated: the
+// driver app calls this immediately after OTP login to decide whether
+// to route to onboarding (no Driver doc → 404), the pending-review
+// screen (status=pending), or home (status=approved). At that point
+// the user may still be role=rider, so a `requireRole('driver')` gate
+// would block onboarding entirely. The controller still scopes to
+// `Driver.findOne({ user: req.auth.userId })`, so a user can only ever
+// see their own record — no information leak from dropping the gate.
+router.get('/me', requireAuth, getMyDriver);
 
 // Currently-dispatched trip(s) for the requesting driver. Empty list when
 // they're online but unassigned; the client polls this on a tick.
