@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../models/country.dart';
 import '../routes.dart';
 import '../services/api/mock_auth_api.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/country_picker_bottom_sheet.dart';
 
 const _demoRiderEntries = [
   ('Demo Rider 1', '9990000101'),
@@ -24,6 +26,10 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   final _phone = TextEditingController();
   bool _busy = false;
   String? _error;
+  // Defaults to India — picker is one tap away if the user is overseas.
+  // Stored separately from the digits field so MSG91 always receives a
+  // properly-prefixed E.164 number even if the user types nothing extra.
+  Country _country = Country.defaultCountry;
 
   @override
   void dispose() {
@@ -31,13 +37,42 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
     super.dispose();
   }
 
+  Future<void> _pickCountry() async {
+    final picked = await CountryPickerBottomSheet.show(
+      context,
+      selected: _country,
+    );
+    if (picked != null && picked.code != _country.code) {
+      setState(() => _country = picked);
+    }
+  }
+
+  /// Combine the picked dial code with the digits the user typed into
+  /// the final E.164 string we send to MSG91 (`+91XXXXXXXXXX` etc.).
+  /// Strips any non-digit characters from the typed value and removes a
+  /// leading `0` (common Indian habit — phones are stored without it).
+  String _composeE164() {
+    final digits = _phone.text.replaceAll(RegExp(r'\D'), '');
+    final stripped = digits.startsWith('0') ? digits.substring(1) : digits;
+    return '${_country.prefix}$stripped';
+  }
+
   Future<void> _send() async {
+    final e164 = _composeE164();
+    // Cheapest possible validation — MSG91 + zod on the backend do the
+    // real check. We just block obviously-empty / 1-2 digit submits so
+    // the user doesn't pay for the round-trip to find out.
+    final localDigits = e164.length - _country.prefix.length;
+    if (localDigits < 5) {
+      setState(() => _error = 'Enter a valid phone number');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await context.read<AuthService>().requestOtp(_phone.text);
+      await context.read<AuthService>().requestOtp(e164);
       if (!mounted) return;
       Navigator.of(context).pushNamed(Routes.otpVerify);
     } catch (e) {
@@ -48,11 +83,14 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   }
 
   /// Tap-to-fill: drop the chosen demo phone into the input AND immediately
-  /// request the OTP. Two taps total (this + demo OTP on the next screen) to
-  /// log in as the picked rider.
+  /// request the OTP. Demo riders are seeded as Indian numbers, so force
+  /// the country picker back to India before composing.
   Future<void> _useDemoRider(String phone) async {
     _phone.text = phone;
-    setState(() => _error = null);
+    setState(() {
+      _country = Country.defaultCountry;
+      _error = null;
+    });
     await _send();
   }
 
@@ -67,20 +105,20 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 24),
-              Container(
-                width: 56,
-                height: 56,
+              // App icon tile. Centered horizontally on its own line —
+              // Align opts out of the parent Column's
+              // `crossAxisAlignment: stretch`, so the tile keeps its
+              // natural 56x56 size instead of getting blown out to
+              // full width and squishing the icon.
+              Align(
                 alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.brand,
+                child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Text(
-                  'S',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
+                  child: Image.asset(
+                    'assets/appIcon.png',
+                    width: 56,
+                    height: 56,
+                    fit: BoxFit.cover,
                   ),
                 ),
               ),
@@ -95,19 +133,35 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                 style: TextStyle(color: Colors.black54, height: 1.4),
               ),
               const SizedBox(height: 28),
-              TextField(
-                controller: _phone,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-                  LengthLimitingTextInputFormatter(16),
+              // Country picker on the left of the digits field. The
+              // dial code is owned by the picker so the input only ever
+              // accepts the local number — no need to remember "+91".
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CountryCodeButton(
+                    country: _country,
+                    onTap: _busy ? null : _pickCountry,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _phone,
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [
+                        // Digits only — the dial code is supplied by the picker.
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(14),
+                      ],
+                      autofocus: true,
+                      onSubmitted: (_) => _send(),
+                      decoration: const InputDecoration(
+                        labelText: 'Phone number',
+                        prefixIcon: Icon(Icons.phone_outlined),
+                      ),
+                    ),
+                  ),
                 ],
-                autofocus: true,
-                onSubmitted: (_) => _send(),
-                decoration: const InputDecoration(
-                  labelText: 'Phone number',
-                  prefixIcon: Icon(Icons.phone_outlined),
-                ),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),
@@ -261,6 +315,55 @@ class _DemoRiderRow extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Country-code prefix button shown to the left of the phone digits
+/// field. Deliberately text-only (no flag emoji) because flag glyphs
+/// don't render on every device — when they fail you get two tofu boxes
+/// per flag which blow the chip's width out and squeeze the input next
+/// to it. The bottom-sheet picker shows country names, which is enough
+/// for users to find the right entry.
+class _CountryCodeButton extends StatelessWidget {
+  final Country country;
+  final VoidCallback? onTap;
+  const _CountryCodeButton({required this.country, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        // 56px matches the default Material 3 TextField height so the
+        // chip and the phone input align cleanly on the same row.
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: AppTheme.brandLight,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              country.prefix,
+              style: const TextStyle(
+                color: AppTheme.brandDark,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.arrow_drop_down,
+              color: AppTheme.brandDark,
+              size: 22,
+            ),
+          ],
         ),
       ),
     );

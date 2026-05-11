@@ -11,8 +11,8 @@ import 'api/auth_api.dart';
 /// Phone + OTP auth with persistent "forever-logged-in" sessions.
 ///
 /// Flow:
-///   1. `requestOtp(phone)`  — server sends OTP (or returns it in mock mode).
-///   2. `verifyOtp(otp)`     — exchange phone + OTP for an [AuthSession].
+///   1. `requestOtp(phone)`  — configured [AuthApi] sends OTP.
+///   2. `verifyOtp(otp)`     — exchange verified OTP proof for a session.
 ///   3. Session is persisted; access token auto-refreshes silently when needed.
 ///   4. `logout()`           — revokes the refresh token and clears local state.
 ///

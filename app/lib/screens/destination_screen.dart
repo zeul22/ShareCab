@@ -6,6 +6,7 @@ import '../routes.dart';
 import '../services/location_service.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
+import '../utils/trip_constraints.dart';
 import 'map_picker_screen.dart';
 
 /// Step 1 of the booking flow: pick a pickup and a drop. Continues to the
@@ -20,6 +21,10 @@ class DestinationScreen extends StatelessWidget {
     final pickup = flow.search.pickup ?? context.read<LocationService>().current;
     final dropoff = flow.search.dropoff;
     final airport = flow.search.airportArrivalMode;
+    // Instant client-side mirror of the backend's pickup↔drop distance
+    // guard. Lets us disable Continue and surface a friendly error
+    // BEFORE the round-trip to /trips. Backend is still the authority.
+    final tripError = TripConstraints.validate(pickup, dropoff);
 
     Future<void> pick({required bool isPickup}) async {
       final picked = await Navigator.of(context).push<Place>(
@@ -83,6 +88,10 @@ class DestinationScreen extends StatelessWidget {
                 dotColor: Colors.black87,
                 onTap: () => pick(isPickup: false),
               ),
+              if (tripError != null) ...[
+                const SizedBox(height: 12),
+                _TripErrorBanner(message: tripError),
+              ],
               const SizedBox(height: 24),
             ],
           ),
@@ -96,7 +105,7 @@ class DestinationScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               ElevatedButton(
-                onPressed: pickup != null && dropoff != null
+                onPressed: pickup != null && dropoff != null && tripError == null
                     ? () => Navigator.of(context).pushNamed(Routes.luggage)
                     : null,
                 child: const Text('Next: luggage'),
@@ -110,6 +119,44 @@ class DestinationScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Inline error chip shown below the destination tile when the chosen
+/// pickup ↔ drop pair fails [TripConstraints.validate]. Same content
+/// the backend would return on submit — we just surface it earlier so
+/// the user fixes it without a round-trip + spinner.
+class _TripErrorBanner extends StatelessWidget {
+  final String message;
+  const _TripErrorBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF2F2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFF1C0C0)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline, color: Color(0xFFB00020), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFFB00020),
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,14 +1,14 @@
 import '../../models/auth_session.dart';
 
-/// Abstract auth backend. The Mock impl powers local demos; swap in
-/// `HttpAuthApi` (talking to /api/auth/*) when the backend is wired up.
+/// Abstract auth backend. The Mock impl powers local demos; `Msg91AuthApi`
+/// handles production phone login with the MSG91 widget SDK.
 abstract class AuthApi {
-  /// Ask the server to send an OTP to [phone]. Returns a [debugOtp] in mock /
-  /// dev mode so devs can log in without an SMS gateway. In production this
-  /// is always null and the OTP arrives via SMS.
+  /// Ask the configured auth backend to send an OTP to [phone]. Returns a
+  /// [debugOtp] in mock / dev mode so devs can log in without SMS. In
+  /// production this is always null and the OTP arrives via SMS.
   Future<String?> requestOtp(String phone);
 
-  /// Exchange a phone+OTP for a fresh [AuthSession] (access + refresh tokens).
+  /// Exchange a verified OTP proof for a fresh [AuthSession].
   /// First-time phones auto-create a user account.
   Future<AuthSession> verifyOtp({required String phone, required String otp});
 

@@ -7,7 +7,7 @@ const Unlock = require('../models/Unlock');
 const Message = require('../models/Message');
 const env = require('../config/env');
 const logger = require('../utils/logger');
-const { isWithinIndia } = require('../utils/geo');
+const { isWithinIndia, distanceKm } = require('../utils/geo');
 const { HttpError } = require('../middleware/errorHandler');
 const { findMatchForTrip } = require('../services/matchingService');
 const { assignDriverForTrip, assignDriverForGroup } = require('../services/dispatchService');
@@ -41,16 +41,51 @@ const point = z
   })
   .refine(isWithinIndia, { message: 'Coordinates must be within India' });
 
-const requestSchema = z.object({
-  pickup: point,
-  dropoff: point,
-  shareEnabled: z.boolean().default(true),
-});
+// Sanity-check pickup ↔ drop distance. Rejects the three obvious abuse
+// cases: pickup == drop (misclick), too-short ride (<300m, fragmented
+// hop), and intercity / inter-region (>100km, not what ShareCab is for).
+// Reused by both request and estimate so the rider sees the same error
+// at fare preview time as they would at booking.
+function refinePickupDropDistance(data, ctx) {
+  const km = distanceKm(
+    { lat: data.pickup.lat, lng: data.pickup.lng },
+    { lat: data.dropoff.lat, lng: data.dropoff.lng },
+  );
+  if (km < env.trip.minDistanceKm) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['dropoff'],
+      message:
+        `Pickup and drop are too close (${km.toFixed(2)} km). ` +
+        'ShareCab needs at least ' +
+        `${(env.trip.minDistanceKm * 1000).toFixed(0)} m between them.`,
+    });
+  } else if (km > env.trip.maxDistanceKm) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['dropoff'],
+      message:
+        `Trip is too far (${km.toFixed(1)} km). ` +
+        `ShareCab is for short city trips up to ${env.trip.maxDistanceKm} km — ` +
+        'try a taxi service for intercity rides.',
+    });
+  }
+}
 
-const estimateSchema = z.object({
-  pickup: point,
-  dropoff: point,
-});
+const requestSchema = z
+  .object({
+    pickup: point,
+    dropoff: point,
+    shareEnabled: z.boolean().default(true),
+  })
+  .superRefine(refinePickupDropDistance);
+
+const estimateSchema = z
+  .object({
+    pickup: point,
+    dropoff: point,
+  })
+  .superRefine(refinePickupDropDistance);
 
 async function estimate(req, res, next) {
   try {
