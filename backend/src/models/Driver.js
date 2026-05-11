@@ -13,6 +13,18 @@ const driverSchema = new mongoose.Schema(
       capacity: { type: Number, default: 4 },
     },
 
+    // Driver-app onboarding gate. 'pending' until ops approves the
+    // submission, 'approved' lets the driver reach the home dashboard +
+    // online toggle. 'rejected' is here for future use but the rejection
+    // UX is a follow-up — for now ops just leaves the doc on 'pending'
+    // or flips it to 'approved'.
+    verificationStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+      index: true,
+    },
+
     isOnline: { type: Boolean, default: false, index: true },
     currentLocation: {
       type: { type: String, enum: ['Point'], default: 'Point' },

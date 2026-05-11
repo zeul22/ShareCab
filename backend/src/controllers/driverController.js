@@ -1,6 +1,7 @@
 const { z } = require('zod');
 const Driver = require('../models/Driver');
 const Trip = require('../models/Trip');
+const User = require('../models/User');
 const env = require('../config/env');
 const { HttpError } = require('../middleware/errorHandler');
 const { isWithinIndia } = require('../utils/geo');
@@ -24,6 +25,17 @@ async function loadDriverForRequest(req) {
 async function setOnline(req, res, next) {
   try {
     const driver = await loadDriverForRequest(req);
+
+    // Verification gate. Drivers must clear ops review before they can
+    // accept dispatches — this is the first thing the driver app checks
+    // and the same gate is enforced server-side so a malicious client
+    // can't bypass it. 'rejected' surfaces the same 403 as 'pending'.
+    if (driver.verificationStatus !== 'approved') {
+      throw new HttpError(
+        403,
+        'Account is still under review. You will be able to go online once approved.',
+      );
+    }
 
     // Subscription gate. Drivers without an active subscription cannot
     // accept dispatches — this is the entire monetisation surface for
@@ -104,6 +116,7 @@ async function getMyDriver(req, res, next) {
         isOnline: driver.isOnline,
         activeTrips: driver.activeTrips,
         currentLocation: driver.currentLocation,
+        verificationStatus: driver.verificationStatus,
         subscription: {
           isSubscribed: driver.isSubscribed,
           startedAt: driver.subscriptionStartedAt,
@@ -253,6 +266,106 @@ async function confirmSubscription(req, res, next) {
   }
 }
 
+// =============================================================================
+// Driver onboarding
+//
+// Mirrors the Rapido/Uber/Ola first-launch flow: a logged-in rider submits
+// the wizard payload here, the backend creates a Driver document with
+// verificationStatus='pending' and promotes their User.role to 'driver'.
+//
+// Ops manually flips verificationStatus → 'approved' in the dashboard
+// (admin UI is out of scope here; for now an internal Mongo update or a
+// future /admin endpoint handles it). When MSG91_DEV_FALLBACK is on we
+// auto-approve so the dev demo doesn't get stuck on the pending screen.
+// =============================================================================
+
+const onboardSchema = z.object({
+  fullName: z.string().min(2).max(80),
+  email: z.string().email().optional(),
+  licenseNumber: z.string().min(4).max(32),
+  vehicle: z.object({
+    model: z.string().min(2).max(60),
+    plate: z.string().min(4).max(16),
+    color: z.string().max(30).optional(),
+    capacity: z.number().int().min(1).max(8).optional(),
+  }),
+});
+
+async function onboardDriver(req, res, next) {
+  try {
+    const data = onboardSchema.parse(req.body);
+
+    const existing = await Driver.findOne({ user: req.auth.userId });
+    if (existing) {
+      throw new HttpError(409, 'Driver profile already exists');
+    }
+
+    const user = await User.findById(req.auth.userId);
+    if (!user) throw new HttpError(404, 'User not found');
+
+    // Grant the trial subscription so the driver isn't double-blocked
+    // (verification AND subscription) the moment ops approves them.
+    const trialDays = env.driverSub.freeTrialDays;
+    const now = new Date();
+    const trialExpiresAt = trialDays > 0
+      ? new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000)
+      : null;
+
+    // Dev fallback auto-approves so local demos don't stall on the
+    // pending screen. Production drivers wait for the ops dashboard.
+    const verificationStatus = env.msg91.devFallback ? 'approved' : 'pending';
+
+    const driver = await Driver.create({
+      user: user._id,
+      licenseNumber: data.licenseNumber.toUpperCase(),
+      vehicle: {
+        model: data.vehicle.model,
+        plate: data.vehicle.plate.toUpperCase(),
+        color: data.vehicle.color,
+        capacity: data.vehicle.capacity ?? 4,
+      },
+      verificationStatus,
+      subscriptionStartedAt: trialDays > 0 ? now : null,
+      subscriptionExpiresAt: trialExpiresAt,
+      subscriptionPaymentRef: trialDays > 0 ? 'free-trial' : null,
+    });
+
+    // Promote the User role + capture the driver-app name/email. Both
+    // are saved on the User doc so the rider app (if the same person
+    // had a rider session) sees the new role on their next refresh.
+    user.role = 'driver';
+    user.name = data.fullName;
+    if (data.email) user.email = data.email;
+    await user.save();
+
+    logger.info(
+      `Driver onboarded user=${user._id} status=${verificationStatus} ` +
+      `plate=${driver.vehicle.plate}`,
+    );
+
+    res.status(201).json({
+      driver: {
+        _id: driver._id,
+        user: driver.user,
+        licenseNumber: driver.licenseNumber,
+        vehicle: driver.vehicle,
+        isOnline: driver.isOnline,
+        activeTrips: driver.activeTrips,
+        currentLocation: driver.currentLocation,
+        verificationStatus: driver.verificationStatus,
+        subscription: {
+          isSubscribed: driver.isSubscribed,
+          startedAt: driver.subscriptionStartedAt,
+          expiresAt: driver.subscriptionExpiresAt,
+          paymentRef: driver.subscriptionPaymentRef,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   setOnline,
   setOffline,
@@ -262,4 +375,5 @@ module.exports = {
   getMySubscription,
   startSubscriptionOrder,
   confirmSubscription,
+  onboardDriver,
 };

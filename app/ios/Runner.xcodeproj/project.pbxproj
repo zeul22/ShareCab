@@ -105,7 +105,6 @@
 				B7BEF5DFCA01A04701A6F7C1 /* Pods-RunnerTests.release.xcconfig */,
 				0933EB85613EFED2EE1828A5 /* Pods-RunnerTests.profile.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
@@ -200,6 +199,7 @@
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				BDB39D769C95A8F23A0586CD /* [CP] Embed Pods Frameworks */,
 				8A449983BB443438A658E623 /* [CP] Copy Pods Resources */,
+				E08C8BCD41D531F95461E970 /* Copy Razorpay dSYM into archive */,
 			);
 			buildRules = (
 			);
@@ -358,6 +358,24 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
+		E08C8BCD41D531F95461E970 /* Copy Razorpay dSYM into archive */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Razorpay dSYM into archive";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -u\n# Find the device-slice dSYM in any installed Razorpay xcframework.\n# `find` rather than a hardcoded path so future Razorpay versions\n# that restructure their pod layout still work.\nRAZORPAY_DSYM=$(find \"${SRCROOT}/Pods\" \\\n  -name \"Razorpay.framework.dSYM\" -type d \\\n  -path \"*ios-arm64/dSYMs/*\" 2>/dev/null | head -1)\nif [ -n \"$RAZORPAY_DSYM\" ] && [ -d \"$RAZORPAY_DSYM\" ]; then\n  mkdir -p \"${DWARF_DSYM_FOLDER_PATH}\"\n  cp -R \"$RAZORPAY_DSYM\" \"${DWARF_DSYM_FOLDER_PATH}/\"\n  echo \"Copied Razorpay dSYM from $RAZORPAY_DSYM\"\nelse\n  echo \"warning: Razorpay dSYM not found in any xcframework under Pods/. \" \\\n       \"Symbol upload to App Store Connect will fail for Razorpay.framework. \" \\\n       \"Check pod install logs.\"\nfi\n";
+		};
 		F4C14A851B03B075933E742B /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -492,11 +510,14 @@
 				DEVELOPMENT_TEAM = JZVW649NG3;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShareCab;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.sharecab;
+				MARKETING_VERSION = 0.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sharecab.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -675,11 +696,14 @@
 				DEVELOPMENT_TEAM = JZVW649NG3;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShareCab;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.sharecab;
+				MARKETING_VERSION = 0.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sharecab.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -698,11 +722,14 @@
 				DEVELOPMENT_TEAM = JZVW649NG3;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Runner/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ShareCab;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.sharecab;
+				MARKETING_VERSION = 0.0.3;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sharecab.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_OBJC_BRIDGING_HEADER = "Runner/Runner-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

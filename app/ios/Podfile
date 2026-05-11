@@ -5,6 +5,11 @@ platform :ios, '14.0'
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
+# Used in post_install to inject a build phase into Runner.xcodeproj for the
+# Razorpay dSYM copy fix. CocoaPods bundles this gem but doesn't load it by
+# default in newer versions, so be explicit.
+require 'xcodeproj'
+
 project 'Runner', {
   'Debug' => :debug,
   'Profile' => :release,
@@ -47,6 +52,51 @@ post_install do |installer|
       # Excluding arm64 on the simulator avoids "x86_64 vs arm64" linker
       # errors on Apple-silicon Macs while still building for real devices.
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64' if `uname -m`.strip == 'x86_64'
+    end
+  end
+
+  # ============================================================
+  # Razorpay dSYM copy
+  # ============================================================
+  # Razorpay ships its iOS SDK as an xcframework that DOES include a
+  # dSYM (at `<xcframework>/ios-arm64/dSYMs/Razorpay.framework.dSYM`),
+  # but Xcode's archive step doesn't auto-copy dSYMs out of xcframework
+  # slices. App Store Connect's "Upload Symbols" step then fails with
+  #   "The archive did not include a dSYM for the Razorpay.framework
+  #    with the UUIDs [...]"
+  # We inject a Run Script build phase into the Runner target that
+  # copies the shipped dSYM into Xcode's DWARF_DSYM_FOLDER_PATH during
+  # build. The dSYM already has matching UUIDs, so the upload succeeds
+  # AND crash reports symbolicate inside Razorpay's code (you get real
+  # stack frames, not <symbol not available>). Idempotent — re-running
+  # `pod install` won't duplicate the phase.
+  runner_project_path = File.expand_path('Runner.xcodeproj', __dir__)
+  if File.exist?(runner_project_path)
+    runner_project = Xcodeproj::Project.open(runner_project_path)
+    runner_target = runner_project.targets.find { |t| t.name == 'Runner' }
+    phase_name = 'Copy Razorpay dSYM into archive'
+    if runner_target && !runner_target.build_phases.any? { |p| p.respond_to?(:name) && p.name == phase_name }
+      phase = runner_target.new_shell_script_build_phase(phase_name)
+      phase.shell_script = <<~BASH
+        set -u
+        # Find the device-slice dSYM in any installed Razorpay xcframework.
+        # `find` rather than a hardcoded path so future Razorpay versions
+        # that restructure their pod layout still work.
+        RAZORPAY_DSYM=$(find "${SRCROOT}/Pods" \\
+          -name "Razorpay.framework.dSYM" -type d \\
+          -path "*ios-arm64/dSYMs/*" 2>/dev/null | head -1)
+        if [ -n "$RAZORPAY_DSYM" ] && [ -d "$RAZORPAY_DSYM" ]; then
+          mkdir -p "${DWARF_DSYM_FOLDER_PATH}"
+          cp -R "$RAZORPAY_DSYM" "${DWARF_DSYM_FOLDER_PATH}/"
+          echo "Copied Razorpay dSYM from $RAZORPAY_DSYM"
+        else
+          echo "warning: Razorpay dSYM not found in any xcframework under Pods/. " \\
+               "Symbol upload to App Store Connect will fail for Razorpay.framework. " \\
+               "Check pod install logs."
+        fi
+      BASH
+      # Run after framework embedding so DWARF_DSYM_FOLDER_PATH exists.
+      runner_project.save
     end
   end
 end

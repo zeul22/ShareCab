@@ -90,6 +90,63 @@
         "--dart-define=API_BASE_URL=http://10.0.2.2:4000",
         "--dart-define=GOOGLE_MAPS_KEY=${input:googleMapsKey}"
       ]
+    },
+    {
+      "name": "ShareCab Driver (iOS Simulator)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/driver",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "iphone",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://localhost:4000"
+      ]
+    },
+    {
+      "name": "ShareCab Driver (Android Emulator)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/driver",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "android",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000"
+      ]
+    },
+    {
+      "name": "ShareCab Driver (debug, pick device)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/driver",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000"
+      ]
+    },
+    {
+      "name": "ShareCab Driver (profile)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/driver",
+      "program": "lib/main.dart",
+      "flutterMode": "profile",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000"
+      ]
+    },
+    {
+      "name": "ShareCab Driver (release)",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/driver",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://10.0.2.2:4000"
+      ]
     }
   ],
   "compounds": [
@@ -98,6 +155,22 @@
       "configurations": [
         "ShareCab App (iOS Simulator)",
         "ShareCab App (Android Emulator)"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "ShareCab Rider + Driver (iOS Simulators)",
+      "configurations": [
+        "ShareCab App (iOS Simulator)",
+        "ShareCab Driver (iOS Simulator)"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "ShareCab Rider + Driver (Android Emulators)",
+      "configurations": [
+        "ShareCab App (Android Emulator)",
+        "ShareCab Driver (Android Emulator)"
       ],
       "stopAll": true
     }
