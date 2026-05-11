@@ -115,6 +115,25 @@ class ApiConfig {
         'Missing widget config: ${missing.join(', ')}';
   }
 
+  // AdMob rewarded video ad unit. Defaults to AdMob's OFFICIAL test
+  // ad unit (developers.google.com/admob/flutter/test-ads), which
+  // always serves a test ad and never monetises. Override with your
+  // real `ca-app-pub-*/*` unit id via:
+  //   flutter run --dart-define=ADMOB_REWARDED_AD_UNIT_ANDROID=...
+  //               --dart-define=ADMOB_REWARDED_AD_UNIT_IOS=...
+  static const String _admobRewardedAdUnitAndroid = String.fromEnvironment(
+    'ADMOB_REWARDED_AD_UNIT_ANDROID',
+    defaultValue: 'ca-app-pub-3940256099942544/5224354917',
+  );
+  static const String _admobRewardedAdUnitIos = String.fromEnvironment(
+    'ADMOB_REWARDED_AD_UNIT_IOS',
+    defaultValue: 'ca-app-pub-3940256099942544/1712485313',
+  );
+  /// Picks the right test/prod ad unit for the running platform. The
+  /// AdService consumes this when loading a rewarded ad.
+  static String admobRewardedAdUnit({required bool isIos}) =>
+      isIos ? _admobRewardedAdUnitIos : _admobRewardedAdUnitAndroid;
+
   // Google Maps Platform API key — used by the Places autocomplete widget.
   // Native map rendering uses the keys configured in the Android/iOS native
   // projects (AndroidManifest.xml + ios/Runner/Info.plist).

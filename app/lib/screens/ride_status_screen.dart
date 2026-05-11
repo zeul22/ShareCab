@@ -145,7 +145,13 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
                     points: polylinePoints,
                     color: AppTheme.brand,
                     width: 4,
-                    patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+                    // Solid when Directions API gave us real road
+                    // geometry; dashed while we're still showing the
+                    // straight-line fallback. The rider can tell at a
+                    // glance whether the path is approximate or real.
+                    patterns: _roadPoints != null
+                        ? const []
+                        : [PatternItem.dash(20), PatternItem.gap(10)],
                   ),
                 },
               ),
@@ -263,16 +269,29 @@ class _RideCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            'Driver ${ride.driver.name} · plate ••${ride.driver.vehicle.plateLast4}',
-            style: const TextStyle(color: Colors.black54),
-          ),
+          // Hide the "Driver ... · plate ..." line in rider-only mode,
+          // where the backend doesn't assign a driver — otherwise we'd
+          // render placeholder text ("Driver Awaiting driver · plate ··")
+          // which is just visual noise.
+          if (ride.driver.id.isNotEmpty)
+            Text(
+              'Driver ${ride.driver.name} · plate ••${ride.driver.vehicle.plateLast4}',
+              style: const TextStyle(color: Colors.black54),
+            )
+          else
+            const Text(
+              'Coordinate the pickup spot via chat with your co-rider.',
+              style: TextStyle(color: Colors.black54),
+            ),
           const SizedBox(height: 16),
           // Driver-pushed completion: the driver presses "Reached drop"
           // on their end; we sync via polling and auto-advance the rider
           // to payment. So no "I've reached" button here — just a status
           // chip telling the rider what to expect, plus SOS.
-          _DriverProgressChip(status: ride.status),
+          _DriverProgressChip(
+            status: ride.status,
+            riderOnly: ride.driver.id.isEmpty,
+          ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
@@ -345,37 +364,24 @@ class _RideCard extends StatelessWidget {
   }
 }
 
-/// Replaces the old "I've reached" button. Surfaces what the driver is
-/// currently doing so the rider knows the trip will auto-advance to
-/// payment as soon as the driver presses "Reached drop" on their side.
+/// Replaces the old "I've reached" button. Surfaces what's happening
+/// in the ride so the rider knows what comes next without having to
+/// poke around. Driver-dispatch copy ("Driver is on the way…") swaps
+/// out for rider-only copy ("Coordinate with your co-rider…") when
+/// there's no driver assigned.
 class _DriverProgressChip extends StatelessWidget {
   final RideStatus status;
-  const _DriverProgressChip({required this.status});
+  final bool riderOnly;
+  const _DriverProgressChip({
+    required this.status,
+    this.riderOnly = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final (text, icon) = switch (status) {
-      RideStatus.confirmed => (
-          'Driver is on the way to your pickup',
-          Icons.directions_car_outlined,
-        ),
-      RideStatus.arriving => (
-          'Driver is arriving — please be ready',
-          Icons.directions_run,
-        ),
-      RideStatus.inProgress => (
-          'On your way — driver will mark you dropped on arrival',
-          Icons.navigation_outlined,
-        ),
-      RideStatus.completed => (
-          'Trip complete · taking you to payment',
-          Icons.check_circle_outline,
-        ),
-      RideStatus.cancelled => (
-          'Ride cancelled',
-          Icons.cancel_outlined,
-        ),
-    };
+    final (text, icon) = riderOnly
+        ? _riderOnlyCopy(status)
+        : _withDriverCopy(status);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -401,5 +407,59 @@ class _DriverProgressChip extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Copy variants for the driver-dispatch flow (existing default).
+  static (String, IconData) _withDriverCopy(RideStatus status) {
+    return switch (status) {
+      RideStatus.confirmed => (
+          'Driver is on the way to your pickup',
+          Icons.directions_car_outlined,
+        ),
+      RideStatus.arriving => (
+          'Driver is arriving — please be ready',
+          Icons.directions_run,
+        ),
+      RideStatus.inProgress => (
+          'On your way — driver will mark you dropped on arrival',
+          Icons.navigation_outlined,
+        ),
+      RideStatus.completed => (
+          'Trip complete · taking you to payment',
+          Icons.check_circle_outline,
+        ),
+      RideStatus.cancelled => (
+          'Ride cancelled',
+          Icons.cancel_outlined,
+        ),
+    };
+  }
+
+  /// Copy variants for rider-only mode — no driver in the picture,
+  /// the rider is coordinating their own cab with the co-rider via
+  /// the in-app chat. Status enum still represents the trip lifecycle.
+  static (String, IconData) _riderOnlyCopy(RideStatus status) {
+    return switch (status) {
+      RideStatus.confirmed => (
+          'Match locked in · open chat to coordinate your cab',
+          Icons.chat_bubble_outline,
+        ),
+      RideStatus.arriving => (
+          'Heading to pickup · chat with your co-rider',
+          Icons.chat_bubble_outline,
+        ),
+      RideStatus.inProgress => (
+          'Ride underway · stay in touch via chat',
+          Icons.navigation_outlined,
+        ),
+      RideStatus.completed => (
+          'Trip complete · taking you to payment',
+          Icons.check_circle_outline,
+        ),
+      RideStatus.cancelled => (
+          'Ride cancelled',
+          Icons.cancel_outlined,
+        ),
+    };
   }
 }

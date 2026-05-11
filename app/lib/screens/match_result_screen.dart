@@ -6,6 +6,7 @@ import '../models/vehicle.dart';
 import '../routes.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
+import '../widgets/match_unlock_sheet.dart';
 
 /// Shows the candidate match(es). User can accept, reject, or search again.
 ///
@@ -24,9 +25,18 @@ class _MatchResultScreenState extends State<MatchResultScreen>
   // rider a finite window to confirm or reject the match. If they don't act,
   // we auto-reject — the safer default (no surprise commitments) and
   // mirrors the existing Reject button's behaviour exactly.
-  static const Duration _decisionWindow = Duration(seconds: 60);
+  //
+  // Bumped from 60s → 5 min once the AdMob unlock gate landed: riders
+  // now have to watch 2 rewarded ads (~30s each) before they can even
+  // see the co-rider details. 60s wasn't enough; 5 min covers the ad
+  // flow + a normal decision pause with margin.
+  static const Duration _decisionWindow = Duration(minutes: 5);
   late final AnimationController _decisionTimer;
   bool _autoActed = false;
+  // Tracks which proposal ids we've already opened the unlock sheet for
+  // (rider-only mode). Re-opening on every rebuild would loop the sheet
+  // back as soon as the user dismisses it.
+  final Set<String> _unlockSheetShownFor = {};
 
   @override
   void initState() {
@@ -47,8 +57,10 @@ class _MatchResultScreenState extends State<MatchResultScreen>
     });
   }
 
-  /// Top-of-screen draining bar with a live mm:ss caption. Goes red below
-  /// 10s left to push the user toward an explicit decision.
+  /// Top-of-screen draining bar with a live mm:ss caption. Goes red in
+  /// the last 30s so the colour-cue is still meaningful against the
+  /// longer 5-minute window (a 10s threshold would only kick in for
+  /// the final ~3% of the bar, too late to register).
   Widget _buildDecisionBar() {
     return AnimatedBuilder(
       animation: _decisionTimer,
@@ -57,7 +69,7 @@ class _MatchResultScreenState extends State<MatchResultScreen>
             (_decisionWindow.inSeconds * _decisionTimer.value).ceil();
         final mm = (secsLeft ~/ 60).toString().padLeft(2, '0');
         final ss = (secsLeft % 60).toString().padLeft(2, '0');
-        final urgent = secsLeft <= 10;
+        final urgent = secsLeft <= 30;
         final color = urgent ? Colors.red.shade700 : AppTheme.brand;
         return Container(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
@@ -120,10 +132,51 @@ class _MatchResultScreenState extends State<MatchResultScreen>
     super.dispose();
   }
 
+  /// Open the unlock sheet for a gated (rider-only, redacted) proposal.
+  /// On success the polling watcher picks up the unredacted trip on the
+  /// next 2s tick and `gatedUnlock` flips false automatically — so we
+  /// don't need to refresh anything here. Dismissal pops back to home
+  /// (the user can search again without paying).
+  Future<void> _showUnlockSheet(MatchProposal proposal) async {
+    _unlockSheetShownFor.add(proposal.id);
+    final result = await MatchUnlockSheet.show(
+      context,
+      tripId: proposal.id,
+    );
+    if (!mounted) return;
+    switch (result) {
+      case MatchUnlockedSuccess():
+        // Polling will refresh the proposal within 2s. Nothing to do.
+        break;
+      case MatchUnlockCancelled():
+        // User backed out — go home so they're not staring at a
+        // redacted match they can't act on.
+        Navigator.of(context).popUntil(ModalRoute.withName(Routes.home));
+      case MatchUnlockFailed(:final message):
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final flow = context.watch<RideFlowState>();
     final proposals = flow.proposals;
+
+    // Rider-only mode: backend redacted the co-rider on this trip. Open
+    // the unlock sheet (one-time per proposal id) so the user can watch
+    // ads or pay to reveal the details. Deferred to post-frame so
+    // showModalBottomSheet has a real BuildContext to attach to.
+    if (proposals.isNotEmpty &&
+        proposals.first.gatedUnlock &&
+        !_unlockSheetShownFor.contains(proposals.first.id)) {
+      final gated = proposals.first;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showUnlockSheet(gated);
+      });
+    }
 
     // Surface state-change events from polling as a snackbar (then clear it
     // so the same toast doesn't fire on every rebuild).
@@ -147,36 +200,80 @@ class _MatchResultScreenState extends State<MatchResultScreen>
       _decisionTimer.stop();
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Compatible matches')),
-      body: SafeArea(
-        child: Column(
-          children: [
-            if (proposals.isNotEmpty) _buildDecisionBar(),
-            Expanded(
-              child: proposals.isEmpty
-                  ? const _EmptyState()
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(20),
-                      itemCount: proposals.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 16),
-                      itemBuilder: (_, i) => _ProposalCard(proposal: proposals[i]),
-                    ),
-            ),
-          ],
+    // Intercept back (AppBar arrow, gesture, hardware) so the rider
+    // doesn't accidentally bounce to an arbitrary previous route.
+    //   - With an active proposal in front of them: cancel the trip
+    //     and go home — they can't act on two rides at once, and
+    //     letting the trip linger just blocks future searches.
+    //   - With an empty list (co-rider just left, polling for the
+    //     next): preserve the trip and go home. The floating banner
+    //     surfaces "still searching" so the rider can drop back in.
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) => _handleBack(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Compatible matches'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Back to home',
+            onPressed: _handleBack,
+          ),
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-          child: OutlinedButton(
-            onPressed: () =>
-                Navigator.of(context).pushReplacementNamed(Routes.searching),
-            child: const Text('Search again'),
+        body: SafeArea(
+          child: Column(
+            children: [
+              if (proposals.isNotEmpty) _buildDecisionBar(),
+              Expanded(
+                child: proposals.isEmpty
+                    ? const _EmptyState()
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(20),
+                        itemCount: proposals.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 16),
+                        itemBuilder: (_, i) => _ProposalCard(proposal: proposals[i]),
+                      ),
+              ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: OutlinedButton(
+              onPressed: () =>
+                  Navigator.of(context).pushReplacementNamed(Routes.searching),
+              child: const Text('Search again'),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// Back-button handler used by both PopScope (gesture / hardware
+  /// back) and the AppBar leading icon. When the screen is showing a
+  /// live proposal, the rider tapping back means "I'm giving up on
+  /// this match" — cancel the trip server-side so they can start a
+  /// fresh booking without "you already have an active trip" errors.
+  /// When the screen is showing the empty state (no current proposal,
+  /// either co-rider just left or polling hasn't returned anyone yet),
+  /// the trip is still searching server-side — preserve it and just
+  /// take the rider home, where the floating banner gives them a way
+  /// back in.
+  Future<void> _handleBack() async {
+    if (!mounted) return;
+    final flow = context.read<RideFlowState>();
+    final hasLiveProposal = flow.proposals.isNotEmpty;
+    if (hasLiveProposal) {
+      // Stop the auto-reject timer so it can't double-fire while we're
+      // awaiting the cancel round-trip.
+      _autoActed = true;
+      _decisionTimer.stop();
+      await flow.cancelActiveRide();
+    }
+    if (!mounted) return;
+    Navigator.of(context).popUntil(ModalRoute.withName(Routes.home));
   }
 }
 
@@ -370,10 +467,17 @@ class _ProposalCard extends StatelessWidget {
                         onPressed: () async {
                           await context.read<RideFlowState>().acceptProposal(proposal);
                           if (!context.mounted) return;
-                          if (context.read<RideFlowState>().activeRide != null) {
-                            Navigator.of(context)
-                                .pushReplacementNamed(Routes.rideConfirmation);
-                          }
+                          final ride =
+                              context.read<RideFlowState>().activeRide;
+                          if (ride == null) return;
+                          // Rider-only mode: no driver assigned (empty
+                          // id). Skip the driver-tracking screens and
+                          // land on the coordination screen — co-rider
+                          // info + chat + "we're done" close button.
+                          final next = ride.driver.id.isEmpty
+                              ? Routes.riderCoordination
+                              : Routes.rideConfirmation;
+                          Navigator.of(context).pushReplacementNamed(next);
                         },
                         child: const Text('Accept match'),
                       ),

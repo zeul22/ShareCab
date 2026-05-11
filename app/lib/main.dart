@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 
 import 'routes.dart';
+import 'services/ad_service.dart';
 import 'services/api/auth_api.dart';
 import 'services/api/driver_api.dart';
 import 'services/api/http_auth_api.dart';
@@ -36,6 +37,7 @@ import 'screens/ride_completed_screen.dart';
 import 'screens/ride_confirmation_screen.dart';
 import 'screens/ride_history_screen.dart';
 import 'screens/ride_status_screen.dart';
+import 'screens/rider_coordination_screen.dart';
 import 'screens/route_stops_screen.dart';
 import 'screens/searching_screen.dart';
 import 'screens/splash_screen.dart';
@@ -56,6 +58,10 @@ Future<void> main() async {
       ApiConfig.msg91TokenAuth,
     );
   }
+  // AdMob SDK init — fires the underlying MobileAds.initialize() so the
+  // first rewarded-ad load is hot. Failures here are non-fatal; the
+  // unlock sheet falls back to the pay path if ads fail to serve.
+  await AdService.instance.init();
   // Print which auth path is engaged so a silent fallback to dev-OTP
   // is impossible to miss while debugging.
   debugPrint('[auth] ${ApiConfig.msg91DiagnosticSummary}');
@@ -170,6 +176,7 @@ class ShareCabApp extends StatelessWidget {
           Routes.matchResult: (_) => const MatchResultScreen(),
           Routes.routeStops: (_) => const RouteStopsScreen(),
           Routes.rideConfirmation: (_) => const RideConfirmationScreen(),
+          Routes.riderCoordination: (_) => const RiderCoordinationScreen(),
           Routes.liveRide: (_) => const RideStatusScreen(),
           Routes.payment: (_) => const PaymentScreen(),
           Routes.rideCompleted: (_) => const RideCompletedScreen(),

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { z } = require('zod');
 const Trip = require('../models/Trip');
 const Driver = require('../models/Driver');
@@ -124,11 +125,13 @@ async function requestTrip(req, res, next) {
       );
     }
 
-    // Gate: shareEnabled requires an unconsumed unlock (earned by watching ads
-    // or via Razorpay payment). Atomically consume one in a single round-trip
-    // so two concurrent requests can't double-spend the same unlock.
+    // Gate: shareEnabled trips need an unconsumed unlock (earned by
+    // watching ads or via Razorpay payment). In driver-dispatch mode
+    // the unlock is consumed up front (here). In rider-only mode the
+    // gate moves to POST /trips/:id/unlock-match — trip creation is
+    // free so the rider sees whether a match exists before paying.
     let unlock = null;
-    if (data.shareEnabled) {
+    if (data.shareEnabled && !env.match.riderOnly) {
       const now = new Date();
       unlock = await Unlock.findOneAndUpdate(
         { rider: req.auth.userId, usedAt: null, expiresAt: { $gt: now } },
@@ -185,12 +188,28 @@ async function requestTrip(req, res, next) {
     if (data.shareEnabled) {
       const group = await findMatchForTrip(trip._id);
       if (group) {
-        await assignDriverForGroup(group);
+        // In driver-dispatch mode, ALL group trips get a driver assigned
+        // here. In rider-only mode we stop after pairing — riders see
+        // "Match found" on their match screen and coordinate their own
+        // cab via chat once they unlock the match.
+        if (!env.match.riderOnly) await assignDriverForGroup(group);
       } else {
         scheduleDeferredDispatch(trip._id);
       }
-    } else {
+    } else if (!env.match.riderOnly) {
+      // Solo dispatch only when drivers exist. In rider-only mode a
+      // solo (shareEnabled: false) trip has nothing to do — the rider
+      // is just arranging their own cab. We leave the trip in
+      // 'requested' state; the deferred cleanup tidies it up.
       await assignDriverForTrip(trip);
+    } else {
+      // rider-only AND shareEnabled=false: nothing to match against,
+      // nothing to dispatch. Cancel immediately so we don't leave the
+      // trip dangling.
+      trip.status = 'cancelled';
+      trip.cancelledAt = new Date();
+      trip.cancelReason = 'rider-only:solo-not-supported';
+      await trip.save();
     }
 
     const refreshed = await Trip.findById(trip._id).populate(TRIP_POPULATE);
@@ -212,7 +231,9 @@ function scheduleDeferredDispatch(tripId) {
 
       const group = await findMatchForTrip(trip._id);
       if (group) {
-        await assignDriverForGroup(group);
+        // Same branching as requestTrip: dispatch when drivers exist;
+        // stop after pairing when rider-only mode is on.
+        if (!env.match.riderOnly) await assignDriverForGroup(group);
         const refreshed = await Trip.findById(tripId).populate(TRIP_POPULATE);
         await broadcastTripUpdate(refreshed);
       } else {
@@ -256,7 +277,148 @@ async function getTrip(req, res, next) {
     ) {
       throw new HttpError(403, 'Forbidden');
     }
+
+    // Rider-only redaction: until the requesting rider has unlocked
+    // their match, hide the sibling trips' rider info + exact stops.
+    // The match group itself stays visible (so the client knows a match
+    // exists), but co-rider names, ratings, pickups and drops are
+    // stripped. Admin / driver fetches always see the full doc.
+    const redact =
+      env.match.riderOnly &&
+      req.auth.role !== 'admin' &&
+      req.auth.role !== 'driver' &&
+      trip.rider.toString() === req.auth.userId &&
+      !trip.matchRevealedAt;
+    if (redact) {
+      const obj = trip.toObject();
+      if (obj.matchGroup && Array.isArray(obj.matchGroup.trips)) {
+        obj.matchGroup.trips = obj.matchGroup.trips.map((sibling) => {
+          if (String(sibling._id) === String(trip._id)) return sibling;
+          // Keep id + status so the client can render "X co-riders
+          // matched" without leaking identity. Everything else gone.
+          return {
+            _id: sibling._id,
+            status: sibling.status,
+            redacted: true,
+          };
+        });
+      }
+      return res.json({ trip: obj });
+    }
     res.json({ trip });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Rider-only mode: close this trip ourselves. In driver-dispatch mode
+// trip completion is owned by the driver (`dropOffRider`). In rider-
+// only mode there's no driver, so the rider self-completes once
+// they've met / arranged their own cab off-platform. Endpoint only
+// works when MATCH_RIDER_ONLY is on, to keep driver mode unambiguous.
+//
+// Marks this rider's trip as completed with fareFinal=0 (no platform
+// fare to settle — they paid their cab provider directly). If they're
+// in a matched group, settles the group when the last sibling closes
+// too, mirroring `dropOffRider`'s group lifecycle.
+async function riderCloseTrip(req, res, next) {
+  try {
+    if (!env.match.riderOnly) {
+      throw new HttpError(
+        409,
+        'Rider-close is only available in rider-only mode. ' +
+          'Driver-led trips end via /trips/:id/dropped.',
+      );
+    }
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (trip.rider.toString() !== req.auth.userId) {
+      throw new HttpError(403, 'Not your trip');
+    }
+    // Idempotent: closing a closed trip returns the doc without changes.
+    if (trip.status === 'completed' || trip.status === 'cancelled') {
+      return res.json({ trip, alreadyClosed: true });
+    }
+    // Only matched / arriving / in-progress trips are sensible to close.
+    // Pre-match (requested) trips should be cancelled, not closed.
+    const closable = ['matched', 'driver_assigned', 'arriving', 'in_progress'];
+    if (!closable.includes(trip.status)) {
+      throw new HttpError(
+        409,
+        `Cannot close from status ${trip.status}. Cancel instead if you haven't matched yet.`,
+      );
+    }
+
+    const now = new Date();
+    trip.status = 'completed';
+    trip.completedAt = now;
+    // No driver to charge → no platform fare. The rider paid their
+    // off-platform cab (Uber / Ola / etc.) directly; ShareCab only
+    // facilitated the match.
+    trip.fareFinal = 0;
+    await trip.save();
+
+    // Bump this rider's totalRides — they completed a coordinated ride
+    // through us even if no driver was on platform.
+    await User.updateOne({ _id: trip.rider }, { $inc: { totalRides: 1 } });
+
+    // Group bookkeeping: when every sibling has closed, mark the
+    // match group completed too. Mirror of dropOffRider's logic.
+    if (trip.matchGroup) {
+      const group = await MatchGroup.findById(trip.matchGroup).populate('trips');
+      const allDone = group.trips.every((t) => t.status === 'completed');
+      if (allDone) {
+        group.status = 'completed';
+        await group.save();
+      }
+    }
+
+    await broadcastTripUpdate(trip);
+    res.json({ trip });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Rider-only mode: consume an unlock to reveal co-rider details for
+// this trip's matched group. Idempotent — once matchRevealedAt is set,
+// subsequent calls return the populated trip without consuming another
+// unlock. Returns 402 when the rider has no usable unlock, 409 when
+// there's no match to unlock against yet.
+async function unlockMatch(req, res, next) {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (trip.rider.toString() !== req.auth.userId) {
+      throw new HttpError(403, 'Not your trip');
+    }
+    if (!trip.matchGroup) {
+      throw new HttpError(409, 'No match to unlock yet');
+    }
+    if (trip.matchRevealedAt) {
+      // Already unlocked — return populated trip without consuming.
+      const populated = await Trip.findById(trip._id).populate(TRIP_POPULATE);
+      return res.json({ trip: populated, alreadyUnlocked: true });
+    }
+
+    const now = new Date();
+    const unlock = await Unlock.findOneAndUpdate(
+      { rider: req.auth.userId, usedAt: null, expiresAt: { $gt: now } },
+      { $set: { usedAt: now, usedForTrip: trip._id } },
+      { sort: { expiresAt: 1 } },
+    );
+    if (!unlock) {
+      throw new HttpError(
+        402,
+        'Matching gate not unlocked: complete 2 rewarded ads or pay to unlock',
+      );
+    }
+
+    trip.matchRevealedAt = now;
+    await trip.save();
+
+    const populated = await Trip.findById(trip._id).populate(TRIP_POPULATE);
+    res.json({ trip: populated });
   } catch (err) {
     next(err);
   }
@@ -268,6 +430,83 @@ async function listMyTrips(req, res, next) {
       .sort({ createdAt: -1 })
       .limit(50);
     res.json({ trips });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Recent destinations the rider has dropped at, deduped by coords so
+// repeat trips to "home" / "office" collapse to a single entry. We round
+// to 4 decimals (~10m precision) — tight enough that two different
+// buildings on the same street stay separate, loose enough that one
+// rooftop pin coming from Places autocomplete vs another doesn't
+// fragment the list.
+//
+// Implementation uses an aggregation so we can dedup + sort + cap in
+// one round-trip. The client uses this as a tap-to-set-destination
+// shortcut on the destination screen — first-time users see an empty
+// state and pick via the map as usual.
+async function getRecentDestinations(req, res, next) {
+  try {
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || '5', 10) || 5, 1),
+      20,
+    );
+    const rows = await Trip.aggregate([
+      {
+        $match: {
+          rider: new mongoose.Types.ObjectId(req.auth.userId),
+          // Only completed trips → no half-formed / cancelled rides
+          // pollute the list. A user who repeatedly cancelled the same
+          // destination probably doesn't want it back as a shortcut.
+          status: 'completed',
+          'dropoff.location.coordinates': { $exists: true, $ne: [] },
+        },
+      },
+      // Bucket by rounded lat/lng so close-by drops collapse together.
+      {
+        $project: {
+          createdAt: 1,
+          address: { $ifNull: ['$dropoff.address', ''] },
+          lat: { $arrayElemAt: ['$dropoff.location.coordinates', 1] },
+          lng: { $arrayElemAt: ['$dropoff.location.coordinates', 0] },
+        },
+      },
+      {
+        $project: {
+          createdAt: 1,
+          address: 1,
+          lat: 1,
+          lng: 1,
+          // 4-decimal rounding via $round → bucket key.
+          latKey: { $round: ['$lat', 4] },
+          lngKey: { $round: ['$lng', 4] },
+        },
+      },
+      {
+        $group: {
+          _id: { latKey: '$latKey', lngKey: '$lngKey' },
+          // Take the most-recent representative for address + exact coords.
+          address: { $last: '$address' },
+          lat: { $last: '$lat' },
+          lng: { $last: '$lng' },
+          lastUsedAt: { $max: '$createdAt' },
+          tripCount: { $sum: 1 },
+        },
+      },
+      { $sort: { lastUsedAt: -1 } },
+      { $limit: limit },
+    ]);
+
+    res.json({
+      destinations: rows.map((r) => ({
+        address: r.address,
+        lat: r.lat,
+        lng: r.lng,
+        lastUsedAt: r.lastUsedAt,
+        tripCount: r.tripCount,
+      })),
+    });
   } catch (err) {
     next(err);
   }
@@ -519,7 +758,10 @@ module.exports = {
   estimate,
   requestTrip,
   getTrip,
+  unlockMatch,
+  riderCloseTrip,
   listMyTrips,
+  getRecentDestinations,
   getMyActiveTrip,
   cancelTrip,
   getGroupFare,

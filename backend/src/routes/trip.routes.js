@@ -6,10 +6,20 @@ router.post('/estimate', requireAuth, ctrl.estimate);
 router.post('/', requireAuth, ctrl.requestTrip);
 router.get('/mine', requireAuth, ctrl.listMyTrips);
 // /mine/active must be declared before /:id so Express doesn't treat "active"
-// as a trip id and 404 it.
+// as a trip id and 404 it. Same rule for /destinations/recent below.
 router.get('/mine/active', requireAuth, ctrl.getMyActiveTrip);
+// Recent unique destinations the rider has dropped at. Powers the
+// "tap to repeat a past trip" shortcut on the destination screen.
+router.get('/destinations/recent', requireAuth, ctrl.getRecentDestinations);
 router.get('/:id', requireAuth, ctrl.getTrip);
 router.post('/:id/cancel', requireAuth, ctrl.cancelTrip);
+// Rider-only mode: consume an unlock to reveal co-rider details for
+// this matched trip. No-op (returns 409) in driver-dispatch mode since
+// matches in that mode aren't gated this way.
+router.post('/:id/unlock-match', requireAuth, ctrl.unlockMatch);
+// Rider-only mode: rider self-closes a matched trip after they've
+// coordinated their own cab off-platform. 409 in driver-dispatch mode.
+router.post('/:id/rider-close', requireAuth, ctrl.riderCloseTrip);
 router.get('/groups/:id/fare', requireAuth, ctrl.getGroupFare);
 
 // Driver-only lifecycle transitions.

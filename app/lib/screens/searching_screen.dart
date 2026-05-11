@@ -126,7 +126,19 @@ class _SearchingScreenState extends State<SearchingScreen>
     final flow = context.watch<RideFlowState>();
     final airport = flow.search.airportArrivalMode;
 
-    return Scaffold(
+    // Intercept hardware / gesture back so it behaves the same as the
+    // AppBar leading button: pop straight home, leave the search alive
+    // in RideFlowState so the floating banner can ferry the rider back.
+    // Without this, system back pops to the previous route in the stack
+    // (matchPreference / luggage), which doesn't make sense once the
+    // search has started.
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || !mounted) return;
+        Navigator.of(context).popUntil(ModalRoute.withName(Routes.home));
+      },
+      child: Scaffold(
       appBar: AppBar(
         // Back arrow (NOT close) — popping leaves the search running in
         // RideFlowState. The global RideFlowBanner will surface "still
@@ -145,6 +157,7 @@ class _SearchingScreenState extends State<SearchingScreen>
           padding: const EdgeInsets.all(32),
           child: _timeoutReached ? _buildEmptyState(context) : _buildSearching(context, airport),
         ),
+      ),
       ),
     );
   }

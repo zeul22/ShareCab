@@ -25,6 +25,13 @@ const env = {
     // auto-fall-back to solo dispatch; the rider explicitly decides what
     // to do next from the empty-state UI on the searching screen.
     dispatchDelayMs: num(process.env.MATCH_DISPATCH_DELAY_MS, 5 * 60 * 1000),
+    // Rider-only mode. When TRUE we skip driver dispatch entirely — the
+    // matching engine still pairs riders, but they're expected to
+    // coordinate their own cab via chat. The unlock gate also moves from
+    // trip-creation to match-reveal time (rider pays / watches ads only
+    // after a match is found, not before). Used while we're bootstrapping
+    // supply before drivers join. Flip back to false once drivers are on.
+    riderOnly: (process.env.MATCH_RIDER_ONLY || '').toLowerCase() === 'true',
   },
 
   fare: {

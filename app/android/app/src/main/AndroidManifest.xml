@@ -39,6 +39,16 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk"/>
 
+        <!-- AdMob — required by google_mobile_ads to initialise. The
+             value below is AdMob's OFFICIAL test app id (documented at
+             developers.google.com/admob/android/test-ads). Replace
+             with your real `ca-app-pub-*` id before going to prod.
+             Test app id is harmless in production but always serves
+             test ads — never monetises until swapped. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

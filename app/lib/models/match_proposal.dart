@@ -36,6 +36,12 @@ class MatchProposal {
   /// Luggage seats still available — non-negative is required for a valid match.
   final int luggageSeatsFree;
 
+  /// True when the backend redacted sibling rider details on this trip
+  /// (rider-only mode + unlock not yet consumed). The match-result UI
+  /// uses this to gate co-rider info behind the unlock sheet.
+  /// False in driver-dispatch mode, where matches are always revealed.
+  final bool gatedUnlock;
+
   const MatchProposal({
     required this.id,
     required this.coPassengers,
@@ -48,6 +54,7 @@ class MatchProposal {
     required this.luggageSeatsUsed,
     required this.luggageSeatsFree,
     this.groupId,
+    this.gatedUnlock = false,
   });
 
   int get riderCount => coPassengers.length + 1; // +1 for the current user
