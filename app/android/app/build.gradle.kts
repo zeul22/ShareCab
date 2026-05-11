@@ -6,6 +6,16 @@ plugins {
 }
 
 android {
+    // ⚠️ COMPLIANCE: change BOTH `namespace` and `applicationId` below
+    // before submitting to the Play Store — Google rejects packages
+    // starting with `com.example.*` (it's reserved for example code).
+    // Suggested: `com.sharecab.app`. When you change it:
+    //   1. Update the Google Cloud Console restriction on the Maps API key
+    //      (Application restrictions → Android apps → new package).
+    //   2. Recreate the AdMob app + ad units (they're bound to the
+    //      package name + SHA-1 fingerprint).
+    //   3. Update the MSG91 widget's allowed package list.
+    //   4. Re-sign with your release keystore (debug keys must not ship).
     namespace = "com.example.sharecab"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion

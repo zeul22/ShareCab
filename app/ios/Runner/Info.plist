@@ -2,15 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- AdMob app id. Defaults to Google's OFFICIAL iOS test app id
-	     (developers.google.com/admob/ios/test-ads). Replace with your
-	     real ca-app-pub-* id before submitting to App Store. -->
-	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<!-- ==================== App identity ==================== -->
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Sharecab</string>
+	<string>ShareCab</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -51,23 +47,144 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 
-	<!-- Google Maps Platform API key. Replace the placeholder with your real key
-	     before running on a device, or leave as-is to skip map tiles in mock mode. -->
+	<!-- ==================== Export compliance ====================
+	     We use only Apple's standard HTTPS / TLS stack (no custom
+	     crypto). Setting this `false` opts out of the export-compliance
+	     prompt every TestFlight / App Store submission would otherwise
+	     show. Flip back if you ever ship custom encryption code. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
+	<!-- ==================== Google Maps ==================== -->
 	<key>GMSApiKey</key>
 	<string>***REMOVED_GOOGLE_MAPS_KEY***</string>
 
-	<!-- Location permissions for `geolocator`. Required, even if you only ever
-	     use the foreground location. -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>ShareCab uses your location to find nearby rides and drivers.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>ShareCab uses your location to track active rides.</string>
+	<!-- ==================== AdMob ====================
+	     App id. Defaults to Google's OFFICIAL iOS test app id
+	     (developers.google.com/admob/ios/test-ads). Replace with your
+	     real ca-app-pub-* id before submitting to App Store. -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~1458002511</string>
 
-	<!-- Allow http://localhost during local backend development. -->
+	<!-- App Tracking Transparency. iOS 14.5+ requires this string for
+	     ANY SDK that fingerprints the device for ad attribution —
+	     AdMob does, regardless of whether you use IDFA. Without it,
+	     Apple rejects the submission. Keep the wording user-facing
+	     and honest about what we do with the data. -->
+	<key>NSUserTrackingUsageDescription</key>
+	<string>ShareCab uses limited ad-attribution data to measure whether the rewarded ads you watch correctly unlock matching. We never share your identity with advertisers.</string>
+
+	<!-- SKAdNetworkItems — Apple's privacy-preserving ad attribution
+	     mechanism. AdMob mediates many ad networks, each of which has
+	     its own SKAdNetwork identifier; we ship Google's published
+	     list (current as of Aug 2025) so attribution works without
+	     IDFA tracking. Refresh this list before each release:
+	     developers.google.com/admob/ios/ios14 -->
+	<key>SKAdNetworkItems</key>
+	<array>
+		<dict><key>SKAdNetworkIdentifier</key><string>cstr6suwn9.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>4fzdc2evr5.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>4pfyvq9l8r.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>2fnua5tdw4.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>ydx93a7ass.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>p78axxw29g.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>v72qych5uu.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>ludvb6z3bs.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>cp8zw746q7.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>3sh42y64q3.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>c6k4g5qg8m.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>s39g8k73mm.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>3qy4746246.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>3rd42ekr43.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>hs6bdukanm.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>mlmmfzh3r3.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>v4nxqhlyqp.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>wzmmz9fp6w.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>su67r6k2v3.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>yclnxrl5pm.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>t38b2kh725.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>7ug5zh24hu.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>9rd848q2bz.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>n6fk4nfna4.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>kbd757ywx3.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>9t245vhmpl.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>4468km3ulz.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>2u9pt9hc89.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>8s468mfl3y.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>av6w8kgt66.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>klf5c3l5u5.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>ppxm28t8ap.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>424m5254lk.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>uw77j35x4d.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>578prtvx9j.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>4dzt52r2t5.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>tl55sbb4fm.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>e5fvkxwrpn.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>8c4e2ghe7u.skadnetwork</string></dict>
+		<dict><key>SKAdNetworkIdentifier</key><string>3qcr597p9d.skadnetwork</string></dict>
+	</array>
+
+	<!-- ==================== Privacy / permissions usage strings ====================
+	     Each must accurately describe WHY we need the permission AND
+	     what we do with the data. App Store review reads these; vague
+	     strings ("App needs location") are a guaranteed rejection. -->
+
+	<!-- Foreground location — used for the map, pickup detection, and
+	     the matching engine's pickup-radius check. No background
+	     tracking; no historical-trail logging. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>ShareCab uses your location to set your pickup point, find nearby co-riders, and show the live route to your destination. We only access location while the app is open.</string>
+
+	<!-- Apple still requires this string even if you don't intend to
+	     run a background-location update — `geolocator` ships the
+	     capability and review-time linting checks for the string. -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>ShareCab uses your location to set your pickup point and show the live route to your destination. We never track your location while the app is closed.</string>
+
+	<!-- ==================== Outbound URL schemes ====================
+	     iOS 9+ requires apps to declare URL schemes they call via
+	     `canOpenURL` / `openURL`. We open the OS dialer when calling
+	     ShareCab support, the mail composer for support emails, and
+	     google maps for directions previews. SMS isn't used today but
+	     left here to cover the in-app "Share your trip" feature when
+	     wired. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>tel</string>
+		<string>mailto</string>
+		<string>sms</string>
+		<string>comgooglemaps</string>
+	</array>
+
+	<!-- ==================== Network ====================
+	     Tightened App Transport Security. Allowing local networking
+	     covers `flutter run` against a host backend (10.0.2.2 / .local).
+	     NO arbitrary cleartext loads — anything else must be HTTPS. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
 	</dict>
+
+	<!-- ==================== Submission checklist ====================
+	     Before any TestFlight build / App Store submission:
+	       1. Replace bundle id `com.example.sharecab` with your real id
+	          in Xcode (Runner target → General → Bundle Identifier).
+	          Match the value in your Apple Developer team's App ID.
+	       2. Replace the AdMob app id above with your real
+	          `ca-app-pub-XXXX~XXXX` (Test ads still work post-swap
+	          via the rewarded ad unit id in api_config.dart).
+	       3. Replace GMSApiKey with a Cloud-Console-restricted iOS key.
+	       4. Set up real privacy policy URL + support URL in App Store
+	          Connect → App Privacy section.
+	       5. Fill the Privacy Nutrition Label truthfully — location,
+	          identifiers (phone), purchases (Razorpay unlock), usage
+	          data (analytics), and "data linked to user" boxes apply.
+	       6. Add 6.7" + 5.5" screenshots and an App Preview video.
+	       7. Confirm the SKAdNetwork list above is current — refresh
+	          from developers.google.com/admob/ios/ios14 each release.
+	-->
 </dict>
 </plist>

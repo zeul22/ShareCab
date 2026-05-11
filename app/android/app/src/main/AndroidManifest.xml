@@ -1,14 +1,52 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Required by Google Maps SDK + http client. -->
+    <!-- ==================== Permissions ====================
+         Every permission must be justified in the Play Console's Data
+         Safety form. If you stop using one, remove it here too —
+         Google flags unused dangerous permissions on review.
+    -->
+
+    <!-- Network. Required by every plugin that talks to a server. -->
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- Required by `geolocator`. -->
+    <!-- AdMob + offline detection. Lets google_mobile_ads know whether
+         to attempt an ad load and helps Razorpay surface "no network"
+         errors gracefully. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Foreground location. `ACCESS_COARSE_LOCATION` is the floor on
+         Android 12+; `ACCESS_FINE_LOCATION` gets us GPS-accurate
+         coordinates for the pickup picker. We do NOT request the
+         BACKGROUND_LOCATION permission — we don't track when the app
+         is closed. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
+    <!-- Android 13+ requires an explicit permission to post any
+         notification. Without it, `flutter_local_notifications` silently
+         no-ops on Tiramisu (API 33) and above. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- ==================== Feature declarations ====================
+         Marking location features as NOT required keeps the app
+         installable on tablets / devices without a GPS chip. (Without
+         this, Play Store filters out a chunk of compatible devices.)
+    -->
+    <uses-feature
+        android:name="android.hardware.location"
+        android:required="false"/>
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false"/>
+    <uses-feature
+        android:name="android.hardware.location.network"
+        android:required="false"/>
+
     <application
-        android:label="sharecab"
+        android:label="ShareCab"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,10 +69,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Google Maps Platform API key — required by google_maps_flutter on Android.
-             This is the same demo key used in iOS Info.plist; restrict it in the
-             Cloud Console (Android: package + SHA-1) before going public, and rotate
-             it after the demo period. -->
+
+        <!-- ==================== API keys ==================== -->
+
+        <!-- Google Maps Platform API key — required by google_maps_flutter
+             on Android. Replace with a Cloud-Console-restricted Android
+             key (package id + SHA-1 fingerprint) before submission. -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="***REMOVED_GOOGLE_MAPS_KEY***"/>
@@ -55,15 +95,38 @@
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
 
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <!-- ==================== Package visibility (Android 11+) ====================
+         Android 11 ringfences which other apps yours can see / open.
+         These `queries` blocks explicitly whitelist the intents we
+         dispatch from inside the app:
+           - PROCESS_TEXT: Flutter engine's text-actions plugin.
+           - tel:        Calling support hotline from the help screen.
+           - mailto:     Email support / contact link.
+           - smsto:      "Share your trip" SMS (reserved for future use).
+           - https:      Opening the privacy policy / terms web pages.
+         Without these, intent dispatch silently fails on Android 11+.
+    -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="mailto"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="smsto"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
         </intent>
     </queries>
 </manifest>

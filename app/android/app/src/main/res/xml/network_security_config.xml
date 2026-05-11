@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network security config.
+
+  Default: HTTPS only, every domain. The manifest sets
+  android:usesCleartextTraffic="false" which would otherwise block
+  HTTP entirely; this file carves out a narrow exception for the
+  loopback / emulator hosts so `flutter run` against a localhost
+  backend works.
+
+  Production note: anything that ends up serving the app from the
+  Play Store will hit api.sharecab.example over HTTPS — none of the
+  cleartext-allowed hosts here resolve in the wild. Adding new dev
+  hosts is fine, but DO NOT add any public-internet host: a single
+  cleartext entry on a real domain triggers a Play Console warning
+  ("App contains insecure URLs") and is a common source of
+  intercepted-traffic exploits.
+-->
+<network-security-config>
+    <!-- Cleartext allowed only on these hosts. Everything else is
+         HTTPS-only as enforced by base-config's
+         cleartextTrafficPermitted="false". -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Android emulator → host machine. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- iOS-style localhost (for when devs run the app on a
+             physical Android device tethered to a local server). -->
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- Genymotion / generic Android-x86 dev images. -->
+        <domain includeSubdomains="false">10.0.3.2</domain>
+    </domain-config>
+
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
