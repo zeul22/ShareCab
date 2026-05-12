@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../models/driver_dispatch.dart';
 import '../services/api/driver_api.dart';
+import '../services/location_push_service.dart';
 import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 
@@ -61,6 +62,10 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
       _refresh();
       _poll = Timer.periodic(_pollInterval, (_) => _refresh(silent: true));
       _startPositionStream();
+      // Tighten the location-push cadence to 5s for the duration of this
+      // screen. The rider's map polls every 5s on the other side, so
+      // pinging at the same cadence keeps perceived staleness ≤10s.
+      context.read<LocationPushService>().useFastMode();
     });
   }
 
@@ -69,6 +74,10 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     _poll?.cancel();
     _positionSub?.cancel();
     _map?.dispose();
+    // Back to the default 20s cadence; driver is still online but no
+    // longer carrying riders. Idempotent — safe even if useFastMode was
+    // never called (e.g. screen exited before postFrameCallback ran).
+    context.read<LocationPushService>().useNormalMode();
     super.dispose();
   }
 
@@ -163,9 +172,23 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
       _error = null;
     });
     try {
+      // Capture the driver's current GPS at the moment of confirmation
+      // so the backend can store actualPickup / actualDropoff. Falls
+      // through with null coords when the GPS stream hasn't yielded yet
+      // (rare — the geofence wouldn't have fired either) — backend is
+      // tolerant of the missing field.
+      final cur = _currentLatLng;
       final updated = stop.kind == DispatchStopKind.pickup
-          ? await _api.markPickedUp(stop.tripId)
-          : await _api.markDropped(stop.tripId);
+          ? await _api.markPickedUp(
+              stop.tripId,
+              lat: cur?.latitude,
+              lng: cur?.longitude,
+            )
+          : await _api.markDropped(
+              stop.tripId,
+              lat: cur?.latitude,
+              lng: cur?.longitude,
+            );
       if (!mounted) return;
       setState(() {
         _dispatch = updated;
@@ -932,29 +955,63 @@ class _FareCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasGstWedge = dispatch.totalDriverPayout < dispatch.totalFare - 0.5;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppTheme.brandLight,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Row(
+      child: Column(
         children: [
-          const Icon(Icons.payments_outlined, color: AppTheme.brandDark),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text(
-              'Total fare to collect',
-              style: TextStyle(color: AppTheme.brandDark, fontWeight: FontWeight.w700),
-            ),
+          Row(
+            children: [
+              const Icon(Icons.payments_outlined, color: AppTheme.brandDark),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Total fare to collect',
+                  style: TextStyle(
+                      color: AppTheme.brandDark, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                '₹${dispatch.totalFare.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  color: AppTheme.brandDark,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
-          Text(
-            '₹${dispatch.totalFare.toStringAsFixed(0)}',
-            style: const TextStyle(
-              color: AppTheme.brandDark,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_outlined,
+                  size: 18, color: AppTheme.brandDark),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  hasGstWedge
+                      ? "You keep (net of GST passthrough)"
+                      : "You keep",
+                  style: const TextStyle(
+                    color: AppTheme.brandDark,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              Text(
+                '₹${dispatch.totalDriverPayout.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  color: AppTheme.brandDark,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ],
       ),

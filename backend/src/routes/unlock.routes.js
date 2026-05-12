@@ -8,6 +8,11 @@ const ctrl = require('../controllers/unlockController');
 router.post('/ad-reward', ctrl.createAdRewardUnlock);
 router.post('/payment-confirm', ctrl.createPaymentUnlock);
 
+// Razorpay order creation for the unlock pay path. requireAuth because the
+// rider id MUST come from the JWT — letting the client pass it in the body
+// would let anyone mint an unlock receipt against any rider account.
+router.post('/order', requireAuth, ctrl.startUnlockOrder);
+
 router.get('/me', requireAuth, ctrl.getMyUnlocks);
 
 module.exports = router;

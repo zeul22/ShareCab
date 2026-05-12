@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../services/ad_service.dart';
 import '../services/api/ride_api.dart';
+import '../services/auth_service.dart';
+import '../services/unlock_checkout.dart';
 import '../theme/app_theme.dart';
 
 /// Outcome of [MatchUnlockSheet.show]. The caller pattern-matches: on
@@ -144,26 +146,48 @@ class _MatchUnlockSheetState extends State<MatchUnlockSheet> {
       _paying = true;
       _error = null;
     });
+    // Capture service refs upfront — we cross multiple async gaps and
+    // can't safely read from `context` after the first await.
+    final user = context.read<AuthService>().user;
+    if (user == null) {
+      // Logged-out riders shouldn't reach this sheet, but defensive:
+      // bail with a clear message rather than crash on null.
+      setState(() {
+        _paying = false;
+        _error = 'You are not signed in.';
+      });
+      return;
+    }
+    final checkout = UnlockCheckout(api: _api);
     try {
-      // Stub Razorpay path: skip the checkout sheet and confirm with a
-      // fake paymentRef. The backend's razorpayClient is in stub mode
-      // when keys aren't configured, so the signature check no-ops.
-      // Real Razorpay flow is a separate slice — wire SubscriptionCheckout
-      // (or its sibling) when we want the actual sheet.
-      await _api.recordPaymentForUnlock(
-        amountPaise: widget.unlockPricePaise,
-        paymentRef: 'stub_${DateTime.now().millisecondsSinceEpoch}',
-        signature: 'stub',
-      );
-      await _api.unlockMatchForTrip(widget.tripId);
-      if (!mounted) return;
-      Navigator.of(context).pop(const MatchUnlockedSuccess());
+      // UnlockCheckout creates the Razorpay order, opens the sheet (or
+      // short-circuits to stub mode when the backend has no keys), and
+      // posts the payment back to /unlocks/payment-confirm. We then
+      // consume the unlock against this specific matched trip.
+      final result = await checkout.pay(user: user);
+      switch (result) {
+        case UnlockCheckoutSuccess():
+          await _api.unlockMatchForTrip(widget.tripId);
+          if (!mounted) return;
+          Navigator.of(context).pop(const MatchUnlockedSuccess());
+        case UnlockCheckoutCancelled():
+          if (!mounted) return;
+          setState(() => _paying = false);
+        case UnlockCheckoutFailed(:final message):
+          if (!mounted) return;
+          setState(() {
+            _paying = false;
+            _error = message;
+          });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _paying = false;
         _error = _clean(e);
       });
+    } finally {
+      checkout.dispose();
     }
   }
 

@@ -132,4 +132,49 @@ async function getMyUnlocks(req, res, next) {
   }
 }
 
-module.exports = { createAdRewardUnlock, createPaymentUnlock, getMyUnlocks };
+// =============================================================================
+// Razorpay order creation for the rider unlock pay path.
+//
+// Two-step flow, mirrors driver subscription:
+//   1. Client POST /unlocks/order. We create a Razorpay order tagged with
+//      notes.kind=rider_unlock + riderId, return orderId + amount + keyId
+//      for the Flutter checkout sheet.
+//   2. After Razorpay's success callback, client POST /unlocks/payment-confirm
+//      with orderId + paymentRef + signature. We verify the HMAC, mint the
+//      Unlock.
+//
+// The webhook handler in paymentController is the safety net — if the
+// client-side confirm call never lands (network drop after payment), the
+// payment.captured webhook still mints the unlock via notes.kind dispatch.
+// =============================================================================
+async function startUnlockOrder(req, res, next) {
+  try {
+    const riderId = req.auth.userId;
+    const order = await razorpay.createOrder({
+      amountPaise: env.unlock.pricePaise,
+      receipt: `unlock_${riderId}_${Date.now()}`,
+      notes: { kind: 'rider_unlock', riderId: String(riderId) },
+    });
+    logger.info(
+      `Unlock order created rider=${riderId} order=${order.id} ` +
+      `pricePaise=${env.unlock.pricePaise} stub=${Boolean(order.stub)}`,
+    );
+    res.json({
+      orderId: order.id,
+      amountPaise: env.unlock.pricePaise,
+      currency: 'INR',
+      // Empty in stub mode — the client uses this as a signal to skip the
+      // Razorpay sheet entirely and confirm with a synthetic paymentRef.
+      razorpayKeyId: env.razorpay.keyId,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  createAdRewardUnlock,
+  createPaymentUnlock,
+  getMyUnlocks,
+  startUnlockOrder,
+};

@@ -12,7 +12,8 @@ const { isWithinIndia, distanceKm } = require('../utils/geo');
 const { HttpError } = require('../middleware/errorHandler');
 const { findMatchForTrip } = require('../services/matchingService');
 const { assignDriverForTrip, assignDriverForGroup } = require('../services/dispatchService');
-const { estimateSoloFare, estimateSharedFareForGroup } = require('../services/fareService');
+const fareService = require('../services/fareService');
+const directionsService = require('../services/directionsService');
 const {
   broadcastTripUpdate,
   broadcastChatReset,
@@ -91,16 +92,35 @@ const estimateSchema = z
 async function estimate(req, res, next) {
   try {
     const data = estimateSchema.parse(req.body);
-    const solo = estimateSoloFare({
-      pickup: { lat: data.pickup.lat, lng: data.pickup.lng },
-      dropoff: { lat: data.dropoff.lat, lng: data.dropoff.lng },
+    // Get a real road-following distance + duration from Directions.
+    // Cached server-side, so repeated estimates on the same stops within
+    // 5 min cost one Google API call.
+    const r = await directionsService.route([
+      { lat: data.pickup.lat, lng: data.pickup.lng },
+      { lat: data.dropoff.lat, lng: data.dropoff.lng },
+    ]);
+    // Vehicle class isn't known pre-dispatch — quote at `sedan` (mid-tier)
+    // as the displayed estimate. The actual settlement fare uses the
+    // assigned driver's class.
+    const solo = fareService.quoteSolo({
+      vehicleClass: 'sedan',
+      distanceMeters: r.distanceMeters,
+      durationSeconds: r.durationSeconds,
     });
-    // Optimistic shared estimate: assume 2 riders, full discount.
-    const shared = {
-      perRider: Math.round(solo.total * (1 - 0.3) / 2),
-      groupTotal: Math.round(solo.total * (1 - 0.3)),
+    // Optimistic shared estimate: ASSUME a 2-rider group with the same
+    // route shape, full share discount, equal split. Real per-rider
+    // allocation depends on each rider's solo leg — we can't compute
+    // that without an actual second rider.
+    const sharedTotalApprox = Math.round(solo.total * (1 - 0.3));
+    const sharedEstimate = {
+      perRider: Math.round(sharedTotalApprox / 2),
+      groupTotal: sharedTotalApprox,
     };
-    res.json({ solo, sharedEstimate: shared });
+    res.json({
+      solo,
+      sharedEstimate,
+      routingSource: r.source, // 'directions' or 'haversine'
+    });
   } catch (err) {
     next(err);
   }
@@ -164,14 +184,23 @@ async function requestTrip(req, res, next) {
       await Unlock.updateOne({ _id: unlock._id }, { $set: { usedForTrip: trip._id } });
     }
 
-    // Fare estimate stored upfront for the rider's reference.
-    const fare = estimateSoloFare({
-      pickup: data.pickup,
-      dropoff: data.dropoff,
+    // Fare estimate stored upfront for the rider's reference. Pre-
+    // dispatch we don't know the assigned driver's vehicle class — quote
+    // at sedan (mid-tier) and re-quote at settlement using the actual
+    // class. Caches Directions for 5 min so this is cheap on retries.
+    const routing = await directionsService.route([
+      { lat: data.pickup.lat, lng: data.pickup.lng },
+      { lat: data.dropoff.lat, lng: data.dropoff.lng },
+    ]);
+    const fare = fareService.quoteSolo({
+      vehicleClass: 'sedan',
+      distanceMeters: routing.distanceMeters,
+      durationSeconds: routing.durationSeconds,
     });
-    trip.fareEstimate = fare.total;
+    trip.fareEstimate = fare.total;          // paise
     trip.distanceKm = fare.distanceKm;
     trip.durationMin = fare.durationMin;
+    trip.fareBreakdown = fare;               // structured breakdown for UI + audit
     await trip.save();
 
     // Match-then-dispatch.
@@ -596,13 +625,33 @@ async function getGroupFare(req, res, next) {
   try {
     const group = await MatchGroup.findById(req.params.id).populate('trips');
     if (!group) throw new HttpError(404, 'Match group not found');
-    const breakdown = estimateSharedFareForGroup(
-      group.trips.map((t) => ({
-        pickup: { lat: t.pickup.location.coordinates[1], lng: t.pickup.location.coordinates[0] },
-        dropoff: { lat: t.dropoff.location.coordinates[1], lng: t.dropoff.location.coordinates[0] },
-      })),
-    );
-    res.json({ group, fare: breakdown });
+
+    // Resolve vehicle class from the dispatched driver (if any). For a
+    // pre-dispatch group quote, default to sedan — same convention as
+    // the solo `estimate` endpoint.
+    let vehicleClass = 'sedan';
+    if (group.driver) {
+      const driver = await Driver.findById(group.driver);
+      if (driver?.vehicle?.capacity != null) {
+        vehicleClass = fareService.classifyByCapacity(driver.vehicle.capacity);
+      }
+    }
+
+    // Use Directions per member for the time component (heavy-traffic
+    // detection); cache makes this cheap on retries.
+    const members = await Promise.all(group.trips.map(async (t) => {
+      const r = await directionsService.route([
+        { lat: t.pickup.location.coordinates[1], lng: t.pickup.location.coordinates[0] },
+        { lat: t.dropoff.location.coordinates[1], lng: t.dropoff.location.coordinates[0] },
+      ]);
+      return {
+        tripId: t._id.toString(),
+        distanceMeters: r.distanceMeters,
+        durationSeconds: r.durationSeconds,
+      };
+    }));
+    const fare = fareService.quoteShared({ vehicleClass, members });
+    res.json({ group, fare });
   } catch (err) {
     next(err);
   }
@@ -655,6 +704,18 @@ async function pickUpRider(req, res, next) {
     const now = new Date();
     trip.status = 'in_progress';
     trip.startedAt = trip.startedAt || now;
+
+    // Capture actual GPS when the driver app sent it. Optional + validated
+    // through the same India-bounds schema as request-time coords. Older
+    // driver-app builds that don't send coords leave actualPickup null;
+    // the rider-side map falls back to the requested pickup pin.
+    const coords = parseActualCoords(req.body);
+    if (coords) {
+      trip.actualPickup = {
+        location: { type: 'Point', coordinates: [coords.lng, coords.lat] },
+        recordedAt: now,
+      };
+    }
     await trip.save();
 
     if (trip.matchGroup) {
@@ -693,32 +754,51 @@ async function dropOffRider(req, res, next) {
     }
     const now = new Date();
 
-    // Settle this rider's fare. Shared trips: per-rider share of the
-    // group fare (so the discount applies even if some siblings are
-    // still in-cab). Solo: the original estimate.
+    // Capture actual drop GPS. Mirrors the pickup capture in pickUpRider —
+    // older driver apps that omit coords leave the field null.
+    const dropCoords = parseActualCoords(req.body);
+    if (dropCoords) {
+      trip.actualDropoff = {
+        location: { type: 'Point', coordinates: [dropCoords.lng, dropCoords.lat] },
+        recordedAt: now,
+      };
+    }
+
+    // Settle this rider's fare. Shared trips: re-quote with the driver's
+    // actual vehicle class and allocate proportionally to each rider's
+    // solo leg (longer leg → higher share). Solo: keep the estimate.
     let fareFinal = trip.fareEstimate;
+    let fareBreakdown = trip.fareBreakdown;
     if (trip.matchGroup) {
       const group = await MatchGroup.findById(trip.matchGroup).populate('trips');
       if (group && group.trips.length > 0) {
-        const fare = estimateSharedFareForGroup(
-          group.trips.map((t) => ({
-            pickup: {
-              lat: t.pickup.location.coordinates[1],
-              lng: t.pickup.location.coordinates[0],
-            },
-            dropoff: {
-              lat: t.dropoff.location.coordinates[1],
-              lng: t.dropoff.location.coordinates[0],
-            },
-          })),
-        );
-        fareFinal = fare.perRider;
+        const vehicleClass = driver.vehicle?.capacity != null
+          ? fareService.classifyByCapacity(driver.vehicle.capacity)
+          : 'sedan';
+        const members = await Promise.all(group.trips.map(async (t) => {
+          const r = await directionsService.route([
+            { lat: t.pickup.location.coordinates[1], lng: t.pickup.location.coordinates[0] },
+            { lat: t.dropoff.location.coordinates[1], lng: t.dropoff.location.coordinates[0] },
+          ]);
+          return {
+            tripId: t._id.toString(),
+            distanceMeters: r.distanceMeters,
+            durationSeconds: r.durationSeconds,
+          };
+        }));
+        const groupFare = fareService.quoteShared({ vehicleClass, members });
+        const mine = groupFare.allocations.find((a) => a.tripId === trip._id.toString());
+        if (mine) {
+          fareFinal = mine.total;
+          fareBreakdown = mine;
+        }
       }
     }
 
     trip.status = 'completed';
     trip.completedAt = now;
     trip.fareFinal = fareFinal;
+    trip.fareBreakdown = fareBreakdown;
     await trip.save();
 
     // This rider is no longer in the cab — pull from activeTrips. We
@@ -754,6 +834,117 @@ async function dropOffRider(req, res, next) {
   }
 }
 
+// Validate optional `{ lat, lng }` from a pickup/drop body. Returns the
+// coords when present and within India; returns null when absent, throws
+// on malformed values so the driver app gets a clear 400. Reused by
+// pickUpRider + dropOffRider so the validation behaviour is identical.
+const actualCoordsSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lng: z.number().min(-180).max(180),
+  })
+  .refine(isWithinIndia, { message: 'Coordinates must be within India' })
+  .nullable();
+
+function parseActualCoords(body) {
+  if (!body || (body.lat == null && body.lng == null)) return null;
+  const parsed = actualCoordsSchema.parse({
+    lat: Number(body.lat),
+    lng: Number(body.lng),
+  });
+  return parsed;
+}
+
+// =============================================================================
+// Live driver location + ETA for the rider's map.
+//
+// Rider's RideStatusScreen polls this every 5 seconds during the
+// arriving + in_progress states. We expose just the data the rider needs:
+//   - driver's current coords + when they were last updated
+//   - ETA seconds + distance to the next pending stop (pickup or drop)
+//
+// Rider must own the trip OR be a co-rider in its matchGroup. Returns
+// 404 when no driver is assigned yet (rider-only mode, or pre-dispatch).
+// =============================================================================
+async function getDriverLocation(req, res, next) {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+
+    // Authorization: rider on the trip, or a co-rider in the same group.
+    const isOwner = trip.rider.toString() === req.auth.userId;
+    let isCoRider = false;
+    if (!isOwner && trip.matchGroup) {
+      const siblings = await Trip.find(
+        { matchGroup: trip.matchGroup, rider: req.auth.userId },
+        { _id: 1 },
+      ).lean();
+      isCoRider = siblings.length > 0;
+    }
+    if (!isOwner && !isCoRider) {
+      throw new HttpError(403, 'Not your trip');
+    }
+
+    if (!trip.driver) {
+      throw new HttpError(404, 'No driver assigned yet');
+    }
+    const driver = await Driver.findById(trip.driver);
+    if (!driver) throw new HttpError(404, 'Driver not found');
+    if (!driver.currentLocation?.coordinates?.length) {
+      throw new HttpError(404, "Driver hasn't reported a location yet");
+    }
+    const driverPos = {
+      lat: driver.currentLocation.coordinates[1],
+      lng: driver.currentLocation.coordinates[0],
+    };
+
+    // ETA target depends on which leg we're on. driver_assigned + arriving
+    // → ETA to pickup. in_progress → ETA to drop. Any other status →
+    // omit ETA (the rider isn't actively tracking).
+    let etaTarget = null;
+    if (trip.status === 'driver_assigned' || trip.status === 'arriving') {
+      etaTarget = {
+        toStop: 'pickup',
+        coords: {
+          lat: trip.pickup.location.coordinates[1],
+          lng: trip.pickup.location.coordinates[0],
+        },
+      };
+    } else if (trip.status === 'in_progress') {
+      etaTarget = {
+        toStop: 'dropoff',
+        coords: {
+          lat: trip.dropoff.location.coordinates[1],
+          lng: trip.dropoff.location.coordinates[0],
+        },
+      };
+    }
+
+    let eta = null;
+    if (etaTarget) {
+      const r = await directionsService.route([driverPos, etaTarget.coords]);
+      eta = {
+        toStop: etaTarget.toStop,
+        seconds: r.durationSeconds,
+        distanceMeters: r.distanceMeters,
+        source: r.source,
+      };
+    }
+
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      driver: {
+        lat: driverPos.lat,
+        lng: driverPos.lng,
+        updatedAt: driver.updatedAt,
+      },
+      eta,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   estimate,
   requestTrip,
@@ -768,4 +959,5 @@ module.exports = {
   arriveTrip,
   pickUpRider,
   dropOffRider,
+  getDriverLocation,
 };
