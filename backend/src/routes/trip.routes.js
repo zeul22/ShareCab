@@ -20,6 +20,10 @@ router.post('/:id/cancel', requireAuth, ctrl.cancelTrip);
 // this matched trip. No-op (returns 409) in driver-dispatch mode since
 // matches in that mode aren't gated this way.
 router.post('/:id/unlock-match', requireAuth, ctrl.unlockMatch);
+// Rider taps "Find Cab" to commit to dispatch. In a shared trip both
+// riders must hit this before any driver is offered; solo trips skip
+// the gate entirely (readyToFindCab is set at trip creation).
+router.post('/:id/find-cab', requireAuth, ctrl.findCab);
 // Rider-only mode: rider self-closes a matched trip after they've
 // coordinated their own cab off-platform. 409 in driver-dispatch mode.
 router.post('/:id/rider-close', requireAuth, ctrl.riderCloseTrip);

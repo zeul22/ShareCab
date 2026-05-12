@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../models/ride.dart';
 import '../models/vehicle.dart';
 import '../routes.dart';
+import '../services/api/ride_api.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fare_breakdown_card.dart';
@@ -27,6 +29,14 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
   // capture provider references for use in dispose.
   RideFlowState? _flow;
 
+  /// In-flight Find Cab request. Disables the button while we're round-
+  /// tripping the backend so a double-tap doesn't fire twice. The
+  /// authoritative source of "this rider already tapped" is
+  /// `ride.isReadyToFindCab` (backend-persisted) — this is just for the
+  /// optimistic UI between tap and response.
+  bool _findingCab = false;
+  String? _findCabError;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -40,6 +50,26 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
       if (!mounted) return;
       _flow?.startWatching();
     });
+  }
+
+  Future<void> _onFindCab(String tripId) async {
+    setState(() {
+      _findingCab = true;
+      _findCabError = null;
+    });
+    try {
+      final api = context.read<RideApi>();
+      await api.findCabForTrip(tripId);
+      // The next poll tick will refresh activeRide with readyToFindCab=true
+      // and (eventually) status=driverAssigned once a driver accepts.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _findCabError = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+      });
+    } finally {
+      if (mounted) setState(() => _findingCab = false);
+    }
   }
 
   @override
@@ -166,9 +196,24 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
     final hasCoRider = ride.proposal.riderCount >= 2;
     final groupId = ride.proposal.groupId;
 
+    // Phase the screen by where we are in the post-match flow:
+    //   - matched/no driver, gate open  → "Find Cab" CTA
+    //   - matched/no driver, gate done  → "Looking for a driver / waiting"
+    //   - driverAssigned (or later)     → "Driver on the way" with details
+    final hasDriver = ride.driver.id.isNotEmpty &&
+        ride.status != RideStatus.confirmed;
+    final showFindCab =
+        ride.status == RideStatus.confirmed && !ride.isReadyToFindCab;
+    final waitingForDriver =
+        ride.status == RideStatus.confirmed && ride.isReadyToFindCab;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Ride confirmed'),
+        title: Text(
+          hasDriver
+              ? 'Driver on the way'
+              : (showFindCab ? 'Match confirmed' : 'Finding your cab'),
+        ),
         actions: [
           if (hasCoRider && groupId != null)
             IconButton(
@@ -186,99 +231,152 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppTheme.brand,
-                borderRadius: BorderRadius.circular(18),
+            // Phase header. Replaces what used to be the OTP-front-and-
+            // centre card — OTP is meaningless until a driver is on the
+            // way, so we surface phase-appropriate copy at the top and
+            // move OTP below.
+            if (showFindCab)
+              _PhaseCard(
+                icon: Icons.directions_car_outlined,
+                title: hasCoRider
+                    ? 'Ready to ride together?'
+                    : 'Ready to find your cab?',
+                body: hasCoRider
+                    ? "Tap Find Cab when you're ready. Your co-rider has to "
+                        'tap it too before we send the trip to a driver.'
+                    : 'Tap Find Cab when you’re ready and we’ll dispatch the '
+                        'nearest available driver.',
+              )
+            else if (waitingForDriver)
+              _PhaseCard(
+                icon: Icons.hourglass_top_outlined,
+                title: 'Looking for a driver…',
+                body: hasCoRider
+                    ? 'We’ll start dispatch once your co-rider also taps '
+                        'Find Cab. A nearby driver gets 30s to accept.'
+                    : 'Sending the trip to the nearest driver. They have '
+                        '30s to accept.',
+                showProgress: true,
+              )
+            else
+              // Driver assigned (or further). Surface the OTP prominently
+              // — this is when it actually matters.
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppTheme.brand,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'YOUR PICKUP OTP',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Text(
+                          ride.otp,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 38,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 8,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          tooltip: 'Copy',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: ride.otp));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('OTP copied')),
+                            );
+                          },
+                          icon: const Icon(Icons.copy, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Share this only with the driver when they arrive at your pickup.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                    ),
+                  ],
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'YOUR PICKUP OTP',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.4,
+            if (_findCabError != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(_findCabError!, style: TextStyle(color: Colors.red.shade900))),
+                  ],
+                ),
+              ),
+            ],
+            // Driver + vehicle cards only appear once a driver has actually
+            // accepted. Before that the placeholder Driver doc would render
+            // "Awaiting driver" / empty plate which read as broken state.
+            if (hasDriver) ...[
+              const SizedBox(height: 20),
+              const _SectionTitle(title: 'Driver'),
+              _Tile(
+                leading: CircleAvatar(
+                  radius: 22,
+                  backgroundColor: AppTheme.brandLight,
+                  child: Text(
+                    ride.driver.name.characters.first,
+                    style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.brandDark),
+                  ),
+                ),
+                title: ride.driver.name,
+                subtitle: '${ride.driver.rating.toStringAsFixed(1)}★ · ${ride.driver.totalRides} rides',
+                trailing: TextButton.icon(
+                  onPressed: () {/* hook into masked-call */},
+                  icon: const Icon(Icons.phone_outlined),
+                  label: const Text('Call'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const _SectionTitle(title: 'Vehicle'),
+              _Tile(
+                leading: const Icon(Icons.directions_car_outlined, size: 32, color: AppTheme.brand),
+                title: '${v.color} ${v.model}',
+                subtitle: '${v.type.label} · seats ${v.type.totalSeats}',
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '••${v.plateLast4}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'Courier',
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Text(
-                        ride.otp,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 38,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 8,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        tooltip: 'Copy',
-                        onPressed: () {
-                          Clipboard.setData(ClipboardData(text: ride.otp));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('OTP copied')),
-                          );
-                        },
-                        icon: const Icon(Icons.copy, color: Colors.white),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Share this with your driver only after they confirm the trip details.',
-                    style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            const _SectionTitle(title:'Driver'),
-            _Tile(
-              leading: CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.brandLight,
-                child: Text(
-                  ride.driver.name.characters.first,
-                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.brandDark),
                 ),
               ),
-              title: ride.driver.name,
-              subtitle: '${ride.driver.rating.toStringAsFixed(1)}★ · ${ride.driver.totalRides} rides',
-              trailing: TextButton.icon(
-                onPressed: () {/* hook into masked-call */},
-                icon: const Icon(Icons.phone_outlined),
-                label: const Text('Call'),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const _SectionTitle(title:'Vehicle'),
-            _Tile(
-              leading: const Icon(Icons.directions_car_outlined, size: 32, color: AppTheme.brand),
-              title: '${v.color} ${v.model}',
-              subtitle: '${v.type.label} · seats ${v.type.totalSeats}',
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.black87,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '••${v.plateLast4}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontFamily: 'Courier',
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ),
-            ),
+            ],
             const SizedBox(height: 16),
             const _SectionTitle(title: 'Your share'),
             // New itemised breakdown when the backend provided one (post-
@@ -320,11 +418,23 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ElevatedButton(
-                onPressed: () =>
-                    Navigator.of(context).pushReplacementNamed(Routes.liveRide),
-                child: const Text('I’m ready — track ride'),
-              ),
+              if (showFindCab)
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.local_taxi_outlined),
+                  label: Text(_findingCab ? 'Submitting…' : 'Find Cab'),
+                  onPressed: _findingCab ? null : () => _onFindCab(ride.id),
+                )
+              else if (waitingForDriver)
+                const ElevatedButton(
+                  onPressed: null,
+                  child: Text('Waiting for driver…'),
+                )
+              else
+                ElevatedButton(
+                  onPressed: () =>
+                      Navigator.of(context).pushReplacementNamed(Routes.liveRide),
+                  child: const Text('Track ride'),
+                ),
               TextButton(
                 onPressed: () => _confirmCancel(context),
                 style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
@@ -333,6 +443,70 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Phase header card — surfaces "what's happening right now" in the
+/// post-match flow. Used for both the Find-Cab and waiting-for-driver
+/// states; the driver-assigned phase has its own OTP card above.
+class _PhaseCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  final bool showProgress;
+  const _PhaseCard({
+    required this.icon,
+    required this.title,
+    required this.body,
+    this.showProgress = false,
+  });
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.brandLight,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppTheme.brandDark, size: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppTheme.brandDark,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  body,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontSize: 13,
+                    height: 1.4,
+                  ),
+                ),
+                if (showProgress) ...[
+                  const SizedBox(height: 10),
+                  const LinearProgressIndicator(
+                    backgroundColor: Colors.white,
+                    valueColor: AlwaysStoppedAnimation(AppTheme.brandDark),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

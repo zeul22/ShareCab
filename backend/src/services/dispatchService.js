@@ -236,6 +236,23 @@ async function findNearestAvailableDriver(nearPoint, { skipDriverIds = [] } = {}
   const skip = (skipDriverIds || []).map((id) =>
     typeof id === 'string' ? id : id.toString(),
   );
+
+  // Pull every driver who currently has a pending offer on the wire
+  // (status='offered', not yet expired). They're mid-decision on
+  // another trip — offering them a second one would either get
+  // silently dropped client-side (the app only renders one offer at a
+  // time) or race with their accept/reject of the first. Either way
+  // it's wrong. activeTrips: $size==0 already filters drivers who
+  // accepted an offer; this filter covers the gap between "offered"
+  // and "accepted/rejected/expired."
+  const now = new Date();
+  const busyWithOfferIds = await Trip.distinct('offeredTo', {
+    status: 'offered',
+    offerExpiresAt: { $gt: now },
+    offeredTo: { $ne: null },
+  });
+  const nin = [...skip, ...busyWithOfferIds.map((id) => id.toString())];
+
   const query = {
     isOnline: true,
     activeTrips: { $size: 0 },
@@ -246,8 +263,8 @@ async function findNearestAvailableDriver(nearPoint, { skipDriverIds = [] } = {}
       },
     },
   };
-  if (skip.length > 0) {
-    query._id = { $nin: skip };
+  if (nin.length > 0) {
+    query._id = { $nin: nin };
   }
   return Driver.findOne(query);
 }

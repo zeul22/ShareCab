@@ -21,6 +21,7 @@ class NotificationService {
 
   static const int _idMatchFound = 100;
   static const int _idSearchTimedOut = 101;
+  static const int _idRideStarted = 102;
 
   Future<void> init() async {
     if (_initialized) return;
@@ -62,6 +63,23 @@ class NotificationService {
       body: 'We couldn\'t find a co-rider in time. You can search again or ride solo.',
       channelId: 'match',
       channelName: 'Ride matches',
+    );
+  }
+
+  /// Fires when the driver enters the rider's OTP at pickup and the
+  /// backend flips the trip to `in_progress`. Pinged from the polling
+  /// watcher (RideFlowState._refreshWatched) once it detects the
+  /// status transition. Different channel from the match notifications
+  /// so the OS groups them sensibly in the shade.
+  Future<void> rideStarted({String? driverName}) async {
+    await _show(
+      id: _idRideStarted,
+      title: 'Ride started',
+      body: driverName != null && driverName.isNotEmpty
+          ? '$driverName has started your ride. Enjoy the trip!'
+          : 'Your driver has started the ride. Enjoy the trip!',
+      channelId: 'trip',
+      channelName: 'Ride updates',
     );
   }
 

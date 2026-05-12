@@ -350,6 +350,13 @@ class RideFlowState extends ChangeNotifier {
       // state (driver progress, completion events, co-rider drops, etc).
       switch (ride.status) {
         case RideStatus.confirmed:
+        case RideStatus.driverAssigned:
+          // Both pre-pickup states land on the confirmation screen — it
+          // renders the Find Cab gate (confirmed + no consent yet),
+          // waiting state (confirmed + consent given), or the driver-
+          // assigned card based on the same ride object, so we don't
+          // need to branch the route. RiderCoordination remains the
+          // landing for rider-only mode where there's no dispatch at all.
           _stage = FlowStage.confirmed;
           startWatching();
           notifyListeners();
@@ -511,6 +518,28 @@ class RideFlowState extends ChangeNotifier {
         changed = true;
       }
       _lastKnownRiderCount = newCount;
+
+      // Status-transition side effects. Captured BEFORE we swap
+      // _activeRide so we have both the previous and new status to
+      // diff. Currently used for the "Ride started" notification when
+      // the driver successfully enters OTP and the backend flips
+      // arriving → in_progress; toast surfaces in-foreground, system
+      // notification covers backgrounded app.
+      final previousStatus = _activeRide?.status;
+      if (previousStatus != null &&
+          previousStatus != RideStatus.inProgress &&
+          ride.status == RideStatus.inProgress) {
+        NotificationService.instance.rideStarted(
+          driverName: ride.driver.name,
+        );
+        _toastMessage = 'Your ride has started. Enjoy the trip!';
+        _stage = FlowStage.inRide;
+      } else if (previousStatus != null &&
+          previousStatus == RideStatus.confirmed &&
+          ride.status == RideStatus.driverAssigned) {
+        _toastMessage =
+            'A driver accepted your trip — they\'re on the way.';
+      }
 
       // Always sync state — even if rider count unchanged, status (driver
       // arriving, in_progress, etc.) might have advanced.

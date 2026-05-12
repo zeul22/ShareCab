@@ -119,17 +119,25 @@ describe('actualPickup persistence', () => {
     expect(reloaded.actualPickup?.location?.coordinates?.length || 0).toBe(0);
   });
 
-  test('rejects out-of-India coords with a 400', async () => {
+  test('tolerates out-of-India coords by dropping them (trip still advances)', async () => {
+    // actualPickup is an optional observability capture, NOT a trip
+    // gate. Bad coords (NaN, out-of-bounds sim GPS, GPS glitch in a
+    // tunnel) should be silently skipped — the pickup transition
+    // still fires, just without actualPickup recorded. Previously
+    // this threw → 500, then a brief stint as 400; both wrong.
     const { user, trip } = await setupDispatchedTrip();
     const { err } = await call(tripCtrl.pickUpRider, {
       auth: { userId: user._id.toString(), role: 'driver' },
       params: { id: trip._id.toString() },
       body: { lat: 40.7128, lng: -74.006 }, // NYC
     });
-    expect(err).toBeDefined();
-    // Trip stays in arriving — no partial mutation.
+    expect(err).toBeUndefined();
     const reloaded = await Trip.findById(trip._id);
-    expect(reloaded.status).toBe('arriving');
+    // Trip advanced because the coords were dropped, not enforced.
+    expect(reloaded.status).toBe('in_progress');
+    // actualPickup not captured (coords were out of bounds → null).
+    expect(reloaded.actualPickup?.recordedAt).toBeFalsy();
+    expect(reloaded.actualPickup?.location?.coordinates?.length || 0).toBe(0);
   });
 });
 

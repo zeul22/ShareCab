@@ -4,9 +4,23 @@ import 'passenger.dart';
 import 'place.dart';
 
 enum RideStatus {
-  confirmed, // accepted, awaiting driver pickup
-  arriving, // driver is en route to pickup
-  inProgress, // ride underway
+  /// Match confirmed but no driver dispatched yet. In shared trips this
+  /// is what the rider sees while their co-rider hasn't tapped Find Cab,
+  /// or while the offer is in flight to a driver.
+  confirmed,
+
+  /// A driver accepted the offer. Driver details (name, vehicle, plate)
+  /// are populated and the rider's screen should flip to "Driver on the
+  /// way". Distinct from `confirmed` so the polling watcher can detect
+  /// the transition and rebuild the UI.
+  driverAssigned,
+
+  /// Driver is en route to this rider's pickup.
+  arriving,
+
+  /// Rider has been picked up; trip is in progress.
+  inProgress,
+
   completed,
   cancelled,
 }
@@ -45,6 +59,13 @@ class Ride {
   /// completed-ride screen + audit.
   final Place? actualDropoff;
 
+  /// True once this rider has tapped "Find Cab" — the explicit consent
+  /// gate that fires driver dispatch. Solo trips are created with this
+  /// already true. Shared trips wait until every rider in the group has
+  /// flipped their bit before any driver gets an offer. Sourced from
+  /// the backend's `Trip.readyToFindCab`.
+  final bool isReadyToFindCab;
+
   const Ride({
     required this.id,
     required this.proposal,
@@ -58,6 +79,7 @@ class Ride {
     this.completedAt,
     this.actualPickup,
     this.actualDropoff,
+    this.isReadyToFindCab = false,
   });
 
   Ride copyWith({
@@ -66,6 +88,7 @@ class Ride {
     DateTime? completedAt,
     Place? actualPickup,
     Place? actualDropoff,
+    bool? isReadyToFindCab,
   }) =>
       Ride(
         id: id,
@@ -80,5 +103,6 @@ class Ride {
         completedAt: completedAt ?? this.completedAt,
         actualPickup: actualPickup ?? this.actualPickup,
         actualDropoff: actualDropoff ?? this.actualDropoff,
+        isReadyToFindCab: isReadyToFindCab ?? this.isReadyToFindCab,
       );
 }

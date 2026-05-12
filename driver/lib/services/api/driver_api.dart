@@ -185,15 +185,20 @@ class DriverApi {
   /// boarded — siblings stay in their current state (e.g. still
   /// `arriving` if not yet picked up).
   ///
+  /// Backend requires [otp] — the 4-digit code shown on the rider's
+  /// confirmation screen. Wrong OTP returns 400; the driver-side modal
+  /// surfaces this so they can ask the rider to re-check.
+  ///
   /// Optionally include the driver's current GPS so the backend can
   /// persist `actualPickup` on the trip. The rider's map snaps the
   /// source pin to this location once the trip flips to in_progress.
   Future<DriverDispatch> markPickedUp(
     String tripId, {
+    required String otp,
     double? lat,
     double? lng,
   }) =>
-      _lifecycleStep('/trips/$tripId/picked-up', lat: lat, lng: lng);
+      _lifecycleStep('/trips/$tripId/picked-up', lat: lat, lng: lng, otp: otp);
 
   /// Per-rider dropoff. The driver hits this once they've delivered
   /// this rider; the backend settles their fare and pulls them from
@@ -210,8 +215,12 @@ class DriverApi {
     String path, {
     double? lat,
     double? lng,
+    String? otp,
   }) async {
-    final body = (lat != null && lng != null) ? {'lat': lat, 'lng': lng} : const <String, dynamic>{};
+    final body = <String, dynamic>{
+      if (lat != null && lng != null) ...{'lat': lat, 'lng': lng},
+      if (otp != null && otp.isNotEmpty) 'otp': otp,
+    };
     final res = await _post(path, body);
     final decoded = _decode(res);
     final trips = (decoded['trips'] as List?) ?? const [];

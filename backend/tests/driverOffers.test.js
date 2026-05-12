@@ -46,7 +46,13 @@ let origTimeoutMs;
 beforeAll(async () => {
   mongo = await MongoMemoryServer.create();
   await mongoose.connect(mongo.getUri());
-  // Shorten the offer timeout for tests so expiry assertions don't wait 15s.
+  // findNearestAvailableDriver runs a $near query against the 2dsphere
+  // index on Driver.currentLocation. Without an explicit init the index
+  // is created lazily on first write, which races the first $near query
+  // and intermittently fails the suite with "unable to find index for
+  // $geoNear query." Force the build up-front.
+  await Driver.init();
+  // Shorten the offer timeout for tests so expiry assertions don't wait 30s.
   origTimeoutMs = env.dispatch.offerTimeoutMs;
   env.dispatch.offerTimeoutMs = 200;
 });
@@ -128,6 +134,40 @@ describe('dispatchService.offerTripToDriver', () => {
     const trip = await makeRequestedTrip();
     const offered = await dispatchService.offerTripToDriver(trip);
     expect(offered).toBeNull();
+  });
+
+  test('skips a driver who already has a pending offer on the wire', async () => {
+    // Two online drivers, one (the nearest) already mid-decision on
+    // another trip. The second trip's dispatch should pick the
+    // farther driver, not pile a competing offer on the busy one.
+    const d1 = await makeOnlineDriver({ offset: 1 }); // nearest
+    const d2 = await makeOnlineDriver({ offset: 5 }); // farther
+    const first = await makeRequestedTrip();
+    const second = await makeRequestedTrip();
+
+    const o1 = await dispatchService.offerTripToDriver(first);
+    expect(o1._id.toString()).toBe(d1._id.toString());
+
+    // d1 is now in `offered`. Dispatch the second trip — must skip d1.
+    const o2 = await dispatchService.offerTripToDriver(second);
+    expect(o2).not.toBeNull();
+    expect(o2._id.toString()).toBe(d2._id.toString());
+  });
+
+  test('drivers in an active trip are still excluded (regression)', async () => {
+    // activeTrips: { $size: 0 } was the original filter — keep it
+    // pinned alongside the new offered-trip filter so we don't
+    // accidentally remove either when refactoring.
+    const d1 = await makeOnlineDriver({ offset: 1 });
+    const d2 = await makeOnlineDriver({ offset: 5 });
+    // Pretend d1 already accepted a trip somewhere.
+    d1.activeTrips = [new mongoose.Types.ObjectId()];
+    await d1.save();
+
+    const trip = await makeRequestedTrip();
+    const offered = await dispatchService.offerTripToDriver(trip);
+    expect(offered).not.toBeNull();
+    expect(offered._id.toString()).toBe(d2._id.toString());
   });
 });
 

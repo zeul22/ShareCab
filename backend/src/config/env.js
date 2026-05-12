@@ -197,10 +197,13 @@ const env = {
   // =============================================================================
   dispatch: {
     // How long a driver has to accept/reject an offered trip before we
-    // auto-reject and re-dispatch. 15s mirrors Uber/Ola — short enough
-    // that an absent driver doesn't strand the rider, long enough for
-    // a driver who's looking at the phone to tap a button.
-    offerTimeoutMs: num(process.env.DISPATCH_OFFER_TIMEOUT_MS, 15_000),
+    // auto-reject and re-dispatch. 30s gives a driver who's mid-task
+    // (eating, refueling, glancing at the phone) realistic time to react;
+    // shorter windows feel punitive and ramp the re-dispatch churn. The
+    // findNearestAvailableDriver query is anchored on the rider's pickup
+    // location, so the nearest online driver is always the one being
+    // offered to — closer drivers get first dibs.
+    offerTimeoutMs: num(process.env.DISPATCH_OFFER_TIMEOUT_MS, 30_000),
     // Max distance (metres) the matching engine looks when finding a
     // driver. Mirrors what `findNearestAvailableDriver` historically
     // hardcoded; lifted to env so we can tune per market.

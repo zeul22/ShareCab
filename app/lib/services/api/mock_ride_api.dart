@@ -213,6 +213,18 @@ class MockRideApi implements RideApi {
   }
 
   @override
+  Future<Ride> findCabForTrip(String tripId) async {
+    await Future.delayed(_latency());
+    // Mock backend has no real dispatch — just return whatever active
+    // ride we already have so the caller's UI flow keeps working.
+    final ride = _activeRide;
+    if (ride == null) {
+      throw StateError('No active ride for $tripId');
+    }
+    return ride;
+  }
+
+  @override
   Future<void> closeRiderTrip(String tripId) async {
     await Future.delayed(_latency());
     // Mock impl: drop the now-closed trip from history so the rider's

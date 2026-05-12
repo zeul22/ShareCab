@@ -570,6 +570,8 @@ class _RideCard extends StatelessWidget {
   String _humanStatus(RideStatus s) {
     switch (s) {
       case RideStatus.confirmed:
+        return 'Looking for a driver';
+      case RideStatus.driverAssigned:
         return 'Driver on the way';
       case RideStatus.arriving:
         return 'Driver arriving';
@@ -632,6 +634,10 @@ class _DriverProgressChip extends StatelessWidget {
   static (String, IconData) _withDriverCopy(RideStatus status) {
     return switch (status) {
       RideStatus.confirmed => (
+          'Looking for a driver',
+          Icons.hourglass_top_outlined,
+        ),
+      RideStatus.driverAssigned => (
           'Driver is on the way to your pickup',
           Icons.directions_car_outlined,
         ),
@@ -659,7 +665,7 @@ class _DriverProgressChip extends StatelessWidget {
   /// the in-app chat. Status enum still represents the trip lifecycle.
   static (String, IconData) _riderOnlyCopy(RideStatus status) {
     return switch (status) {
-      RideStatus.confirmed => (
+      RideStatus.confirmed || RideStatus.driverAssigned => (
           'Match locked in · open chat to coordinate your cab',
           Icons.chat_bubble_outline,
         ),
