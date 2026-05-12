@@ -87,6 +87,14 @@ abstract class RideApi {
   /// 409 if there's no match yet on this trip.
   Future<void> unlockMatchForTrip(String tripId);
 
+  /// Rider taps "Find Cab" — explicit consent to start driver dispatch.
+  /// In a shared trip, both riders must call this; the backend only
+  /// fires the offer once everyone in the matchGroup is ready. Returns
+  /// the refreshed trip so the caller can read `status` + sibling
+  /// `readyToFindCab` to render "waiting for co-rider" if needed.
+  /// 409 if status != 'matched'.
+  Future<Ride> findCabForTrip(String tripId);
+
   /// Rider-only mode: the rider self-closes a matched trip after
   /// they've arranged their own cab off-platform (Uber, Ola, etc.).
   /// Sets fareFinal=0, marks completed, settles the group when the

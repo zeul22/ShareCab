@@ -163,10 +163,28 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
     }
   }
 
-  /// Per-rider stop confirmation. The kind of action depends on the
-  /// stop: pickup vs drop, dispatched to the right backend endpoint.
+  /// Per-rider stop confirmation. Pickup pops an OTP modal that owns
+  /// its own submit / error loop — only closes on a successful 200,
+  /// so wrong-OTP / wrong-status errors are surfaced inline instead of
+  /// silently scrolling off the bottom of the screen. Drop is a simple
+  /// single-tap confirm.
   Future<void> _markStopReached(DispatchStop stop) async {
     if (_busyTripIds.contains(stop.tripId)) return;
+
+    if (stop.kind == DispatchStopKind.pickup) {
+      // _OtpDialog returns the updated DriverDispatch on success or
+      // null on cancel — the network round-trip happens inside.
+      final updated = await _showPickupOtpDialog(stop);
+      if (updated == null) return;
+      if (!mounted) return;
+      setState(() {
+        _dispatch = updated;
+        _error = null;
+      });
+      _maybePopOnCompletion(updated);
+      return;
+    }
+
     setState(() {
       _busyTripIds.add(stop.tripId);
       _error = null;
@@ -178,23 +196,17 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
       // (rare — the geofence wouldn't have fired either) — backend is
       // tolerant of the missing field.
       final cur = _currentLatLng;
-      final updated = stop.kind == DispatchStopKind.pickup
-          ? await _api.markPickedUp(
-              stop.tripId,
-              lat: cur?.latitude,
-              lng: cur?.longitude,
-            )
-          : await _api.markDropped(
-              stop.tripId,
-              lat: cur?.latitude,
-              lng: cur?.longitude,
-            );
+      final updated = await _api.markDropped(
+        stop.tripId,
+        lat: cur?.latitude,
+        lng: cur?.longitude,
+      );
       if (!mounted) return;
       setState(() {
         _dispatch = updated;
         _busyTripIds.remove(stop.tripId);
       });
-      if (stop.kind == DispatchStopKind.dropoff && mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(SnackBar(
@@ -210,6 +222,18 @@ class _ActiveTripScreenState extends State<ActiveTripScreen> {
         _error = _clean(e);
       });
     }
+  }
+
+  Future<DriverDispatch?> _showPickupOtpDialog(DispatchStop stop) {
+    return showDialog<DriverDispatch>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _PickupOtpDialog(
+        stop: stop,
+        getLatLng: () => _currentLatLng,
+        api: _api,
+      ),
+    );
   }
 
   void _maybePopOnCompletion(DriverDispatch d) {
@@ -1052,6 +1076,156 @@ class _ErrorChip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Pickup OTP dialog. Owns the submit + error loop so the driver gets
+/// inline feedback ("Wrong OTP. Ask the rider to check.") without the
+/// modal disappearing on a failed attempt — the prior implementation
+/// closed the dialog before the network call fired, dropping the error
+/// chip somewhere below the fold where it was easy to miss.
+///
+/// Returns the updated DriverDispatch via Navigator.pop on success, or
+/// null when the driver hits Cancel.
+class _PickupOtpDialog extends StatefulWidget {
+  final DispatchStop stop;
+  final LatLng? Function() getLatLng;
+  final DriverApi api;
+
+  const _PickupOtpDialog({
+    required this.stop,
+    required this.getLatLng,
+    required this.api,
+  });
+
+  @override
+  State<_PickupOtpDialog> createState() => _PickupOtpDialogState();
+}
+
+class _PickupOtpDialogState extends State<_PickupOtpDialog> {
+  final _controller = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final otp = _controller.text.trim();
+    if (otp.length != 4) {
+      setState(() => _error = 'Enter all 4 digits.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final cur = widget.getLatLng();
+      final updated = await widget.api.markPickedUp(
+        widget.stop.tripId,
+        otp: otp,
+        lat: cur?.latitude,
+        lng: cur?.longitude,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(updated);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        // _clean is a private helper on the parent state; replicate the
+        // small "strip 'Exception:' prefix" trick locally so this widget
+        // stays self-contained.
+        _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+        // Wipe the entry so the driver can re-type without backspacing.
+        _controller.clear();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Enter pickup OTP'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Ask ${widget.stop.riderName} for their 4-digit pickup code — '
+            'shown on their ShareCab confirmation screen.',
+            style: const TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            enabled: !_submitting,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            textAlign: TextAlign.center,
+            decoration: const InputDecoration(
+              hintText: '••••',
+              counterText: '',
+              border: OutlineInputBorder(),
+            ),
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 12,
+            ),
+            onChanged: (_) {
+              // Clear stale error the moment the driver starts typing
+              // again so the failure state doesn't linger past the fix.
+              if (_error != null) setState(() => _error = null);
+            },
+            onSubmitted: (_) => _submitting ? null : _submit(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.error_outline, color: Color(0xFFB00020), size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _error!,
+                    style: const TextStyle(
+                      color: Color(0xFFB00020),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _submitting ? null : _submit,
+          child: _submitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation(Colors.white),
+                  ),
+                )
+              : const Text('Confirm pickup'),
+        ),
+      ],
     );
   }
 }

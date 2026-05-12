@@ -398,7 +398,10 @@ describe('riderCloseTrip — self-completion in rider-only mode', () => {
 describe('riderCloseTrip in driver-dispatch mode', () => {
   beforeEach(() => { env.match.riderOnly = false; });
 
-  test('returns 409 — only available in rider-only mode', async () => {
+  test('rejects with 409 when a driver is assigned', async () => {
+    // Per-trip gating — a trip *with* a driver belongs on /end-early
+    // so the driver still gets paid. The env flag is irrelevant; what
+    // matters is whether this specific trip has a driver attached.
     const rider = await makeRider();
     await giveUnlock(rider);
     await call(tripCtrl.requestTrip, {
@@ -406,13 +409,44 @@ describe('riderCloseTrip in driver-dispatch mode', () => {
       body: tripBody({ pickup: BLR, drop: nudgeKm(4) }),
     });
     const trip = await Trip.findOne({ rider: rider._id });
+    // Force-attach a driver so the gate trips. Using a synthetic ObjectId
+    // is enough — the controller only checks for truthiness.
+    trip.driver = new mongoose.Types.ObjectId();
+    await trip.save();
     const r = await call(tripCtrl.riderCloseTrip, {
       auth: { userId: rider._id.toString(), role: 'rider' },
       params: { id: trip._id.toString() },
     });
     expect(r.err).toBeDefined();
     expect(r.err.status).toBe(409);
-    expect(r.err.message).toContain('rider-only mode');
+    expect(r.err.message).toContain('/end-early');
+  });
+
+  test('succeeds when no driver is assigned (rider arranged off-platform)', async () => {
+    // Trip matched with a co-rider but no driver dispatched yet — e.g.
+    // dispatch hadn't found anyone, or the rider gave up waiting and
+    // arranged transport elsewhere. Closing should still work, fare=0.
+    // Previously this hit the env-flag gate and 409'd unconditionally.
+    const rider = await makeRider();
+    await giveUnlock(rider);
+    await call(tripCtrl.requestTrip, {
+      auth: { userId: rider._id.toString(), role: 'rider' },
+      body: tripBody({ pickup: BLR, drop: nudgeKm(4) }),
+    });
+    const trip = await Trip.findOne({ rider: rider._id });
+    // Force into a closable status without attaching a driver — mirrors
+    // a matched-but-undispatched trip in driver-dispatch mode.
+    trip.status = 'matched';
+    await trip.save();
+    expect(trip.driver).toBeFalsy();
+    const r = await call(tripCtrl.riderCloseTrip, {
+      auth: { userId: rider._id.toString(), role: 'rider' },
+      params: { id: trip._id.toString() },
+    });
+    expect(r.err).toBeUndefined();
+    const reloaded = await Trip.findById(trip._id);
+    expect(reloaded.status).toBe('completed');
+    expect(reloaded.fareFinal).toBe(0);
   });
 });
 

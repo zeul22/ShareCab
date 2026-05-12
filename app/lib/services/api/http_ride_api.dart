@@ -230,6 +230,14 @@ class HttpRideApi implements RideApi {
   }
 
   @override
+  Future<Ride> findCabForTrip(String tripId) async {
+    final res = await _post('/trips/$tripId/find-cab', const {}, auth: true);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final trip = body['trip'] as Map<String, dynamic>;
+    return _buildRideFromTrip(trip);
+  }
+
+  @override
   Future<void> closeRiderTrip(String tripId) async {
     await _post('/trips/$tripId/rider-close', const {}, auth: true);
   }
@@ -499,10 +507,14 @@ class HttpRideApi implements RideApi {
     final proposal = _buildProposalFromTrip(trip, search);
     final driver = _driverFromBackend(driverDoc, vehicleType: proposal.vehicleType);
 
-    final otp = _rideOtps.putIfAbsent(
-      tripId,
-      () => _generateOtp(),
-    );
+    // Server-generated OTP is the source of truth (backend issues at
+    // trip creation, persists on Trip.otp). Falls back to the local
+    // per-session OTP cache only when the backend omits the field —
+    // strictly a transitional path for trips that predate the
+    // server-side OTP rollout. New trips always carry trip['otp'].
+    final otp = (trip['otp'] as String?)?.trim().isNotEmpty == true
+        ? trip['otp'] as String
+        : _rideOtps.putIfAbsent(tripId, () => _generateOtp());
 
     // Parse `actualPickup` / `actualDropoff` (post-pricing-rewrite trips
     // carry these once the driver taps pickup/drop with GPS). Backend
@@ -542,6 +554,7 @@ class HttpRideApi implements RideApi {
       perRiderFare: proposal.perRiderFare,
       actualPickup: actualPickup,
       actualDropoff: actualDropoff,
+      isReadyToFindCab: trip['readyToFindCab'] as bool? ?? false,
     );
   }
 
@@ -608,10 +621,18 @@ class HttpRideApi implements RideApi {
 
   RideStatus _statusFromBackend(String status) {
     switch (status) {
+      // Pre-dispatch states all map to confirmed — the rider is waiting
+      // for a driver. The Find Cab gate (status='matched' +
+      // readyToFindCab=false) and the offer-in-flight state
+      // (status='offered') are surfaced through other fields, not the
+      // enum, so a UI rebuild from these still fires via the trip-level
+      // polling watcher.
       case 'requested':
       case 'matched':
-      case 'driver_assigned':
+      case 'offered':
         return RideStatus.confirmed;
+      case 'driver_assigned':
+        return RideStatus.driverAssigned;
       case 'arriving':
         return RideStatus.arriving;
       case 'in_progress':

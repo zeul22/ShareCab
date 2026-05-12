@@ -73,7 +73,35 @@ async function setOffline(req, res, next) {
 
 async function updateLocation(req, res, next) {
   try {
-    const { lat, lng } = locationSchema.parse(req.body);
+    // safeParse — driver location is pushed every ~20s while online,
+    // so a single bad fix (sim in Cupertino, GPS glitch in a tunnel)
+    // shouldn't 500 the entire push. We DO still reject obviously-bad
+    // structural input (missing lat/lng) as 400 because the contract
+    // is the body shape; out-of-bounds is treated as "ignore this
+    // fix, wait for the next one." That mirrors how the trip-time
+    // actualPickup capture handles bad coords.
+    const result = locationSchema.safeParse(req.body);
+    if (!result.success) {
+      // Missing / non-numeric lat-lng is a client bug → 400.
+      const fields = (result.error.issues || []).map((i) => i.path.join('.'));
+      const isStructural = fields.some(
+        (f) => f === 'lat' || f === 'lng' || f === '',
+      );
+      if (isStructural) {
+        throw new HttpError(
+          400,
+          'Invalid location payload — needs { lat, lng } as numbers.',
+        );
+      }
+      // Out-of-India refine failure → 204 (accepted, nothing stored).
+      // Returning 204 instead of 200 so the driver app can tell its own
+      // location-push loop apart from a saved fix.
+      logger.warn(
+        `[updateLocation] dropping out-of-bounds fix lat=${req.body?.lat} lng=${req.body?.lng}`,
+      );
+      return res.status(204).end();
+    }
+    const { lat, lng } = result.data;
     const driver = await Driver.findOneAndUpdate(
       { user: req.auth.userId },
       { $set: { currentLocation: { type: 'Point', coordinates: [lng, lat] } } },

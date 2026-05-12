@@ -104,6 +104,20 @@ const tripSchema = new mongoose.Schema(
     // whether to populate co-rider details or return a redacted view.
     // Unused in driver-dispatch mode (we leave it null).
     matchRevealedAt: { type: Date, default: null },
+
+    // 4-digit pickup OTP. Generated server-side at trip creation so the
+    // value can't be forged client-side; the driver enters it from the
+    // rider's phone when arriving at THIS rider's pickup stop. Each trip
+    // in a shared group has its own OTP so a co-rider's OTP can't
+    // pick up the wrong person. Verified in pickUpRider.
+    otp: { type: String },
+
+    // Per-rider "find cab" consent. Shared trips don't dispatch until
+    // every rider in the matchGroup has tapped Find Cab, so neither
+    // rider gets a driver while the other is still deciding. Solo
+    // trips dispatch immediately on creation and skip this gate.
+    // See find-cab + tripController.requestTrip.
+    readyToFindCab: { type: Boolean, default: false, index: true },
   },
   { timestamps: true },
 );

@@ -268,3 +268,198 @@ describe('Trip lifecycle — per-rider transitions in a shared group', () => {
     expect(r.err.status).toBe(400);
   });
 });
+
+describe('pickUpRider OTP gate', () => {
+  // Pickup now requires the rider's 4-digit OTP. Trips created via
+  // requestTrip carry an OTP; trips created via Trip.create here have
+  // to set it explicitly. The gate is no-op when trip.otp is falsy
+  // (transitional path for legacy data).
+  test('rejects with 400 when no OTP supplied and trip has an OTP', async () => {
+    const { user, driver } = await makeDriverWithUser();
+    const { trip } = await makeRiderTrip({ driver, status: 'arriving' });
+    trip.otp = '4242';
+    await trip.save();
+    const auth = { userId: user._id.toString(), role: 'driver' };
+
+    const r = await call(tripCtrl.pickUpRider, {
+      auth,
+      params: { id: trip._id.toString() },
+      body: {},
+    });
+    expect(r.err).toBeDefined();
+    expect(r.err.status).toBe(400);
+    expect((await Trip.findById(trip._id)).status).toBe('arriving');
+  });
+
+  test('rejects with 400 when wrong OTP supplied', async () => {
+    const { user, driver } = await makeDriverWithUser();
+    const { trip } = await makeRiderTrip({ driver, status: 'arriving' });
+    trip.otp = '4242';
+    await trip.save();
+    const auth = { userId: user._id.toString(), role: 'driver' };
+
+    const r = await call(tripCtrl.pickUpRider, {
+      auth,
+      params: { id: trip._id.toString() },
+      body: { otp: '1111' },
+    });
+    expect(r.err).toBeDefined();
+    expect(r.err.status).toBe(400);
+    expect(r.err.message).toMatch(/wrong otp/i);
+  });
+
+  test('advances to in_progress when correct OTP supplied', async () => {
+    const { user, driver } = await makeDriverWithUser();
+    const { trip } = await makeRiderTrip({ driver, status: 'arriving' });
+    trip.otp = '4242';
+    await trip.save();
+    driver.activeTrips = [trip._id];
+    await driver.save();
+    const auth = { userId: user._id.toString(), role: 'driver' };
+
+    const r = await call(tripCtrl.pickUpRider, {
+      auth,
+      params: { id: trip._id.toString() },
+      body: { otp: '4242' },
+    });
+    expect(r.err).toBeUndefined();
+    expect((await Trip.findById(trip._id)).status).toBe('in_progress');
+  });
+
+  test('legacy trips without an OTP still pick up (no gate enforced)', async () => {
+    // Trips created before the OTP rollout (Trip.otp == null) keep
+    // working — the gate is opt-in based on whether the trip carries
+    // an OTP. Once `requestTrip` has been issuing OTPs long enough
+    // that no legacy trips remain, the fallback can be tightened.
+    const { user, driver } = await makeDriverWithUser();
+    const { trip } = await makeRiderTrip({ driver, status: 'arriving' });
+    expect(trip.otp).toBeUndefined();
+    const auth = { userId: user._id.toString(), role: 'driver' };
+
+    const r = await call(tripCtrl.pickUpRider, {
+      auth,
+      params: { id: trip._id.toString() },
+      body: {},
+    });
+    expect(r.err).toBeUndefined();
+    expect((await Trip.findById(trip._id)).status).toBe('in_progress');
+  });
+});
+
+describe('findCab — both-rider consent gate', () => {
+  // Solo trips bypass the gate entirely (readyToFindCab is set true at
+  // trip creation). Shared trips only dispatch once every member has
+  // tapped Find Cab.
+  test('rejects with 409 when called on a non-matched trip', async () => {
+    const rider = await User.create({
+      name: 'Rider', phone: '+919000000001', role: 'rider', passwordHash: 'x',
+    });
+    const trip = await Trip.create({
+      rider: rider._id,
+      pickup: { address: 'p', location: pt(BLR) },
+      dropoff: { address: 'd', location: pt({ lat: BLR.lat + 0.05, lng: BLR.lng + 0.05 }) },
+      status: 'requested',
+      fareEstimate: 200,
+    });
+    const r = await call(tripCtrl.findCab, {
+      auth: { userId: rider._id.toString(), role: 'rider' },
+      params: { id: trip._id.toString() },
+    });
+    expect(r.err).toBeDefined();
+    expect(r.err.status).toBe(409);
+  });
+
+  test('first rider sets readyToFindCab=true; no dispatch yet', async () => {
+    const r1 = await User.create({
+      name: 'R1', phone: '+919000000002', role: 'rider', passwordHash: 'x',
+    });
+    const r2 = await User.create({
+      name: 'R2', phone: '+919000000003', role: 'rider', passwordHash: 'x',
+    });
+    const group = await MatchGroup.create({ trips: [], status: 'forming' });
+    const trip1 = await Trip.create({
+      rider: r1._id, matchGroup: group._id,
+      pickup: { address: 'p', location: pt(BLR) },
+      dropoff: { address: 'd', location: pt({ lat: BLR.lat + 0.05, lng: BLR.lng + 0.05 }) },
+      status: 'matched', fareEstimate: 200,
+    });
+    const trip2 = await Trip.create({
+      rider: r2._id, matchGroup: group._id,
+      pickup: { address: 'p', location: pt(BLR) },
+      dropoff: { address: 'd', location: pt({ lat: BLR.lat + 0.05, lng: BLR.lng + 0.05 }) },
+      status: 'matched', fareEstimate: 200,
+    });
+    group.trips = [trip1._id, trip2._id];
+    await group.save();
+
+    const r = await call(tripCtrl.findCab, {
+      auth: { userId: r1._id.toString(), role: 'rider' },
+      params: { id: trip1._id.toString() },
+    });
+    expect(r.err).toBeUndefined();
+    // Only rider 1 is ready; sibling stays at false. Status remains
+    // matched (no dispatch happened) — there's no online driver in
+    // the test env anyway, but the key invariant is that the trip
+    // didn't go to 'offered'.
+    expect((await Trip.findById(trip1._id)).readyToFindCab).toBe(true);
+    expect((await Trip.findById(trip2._id)).readyToFindCab).toBe(false);
+    expect((await Trip.findById(trip1._id)).status).toBe('matched');
+    expect((await Trip.findById(trip2._id)).status).toBe('matched');
+  });
+
+  test('second rider closes the gate; both ready triggers dispatch (no driver found stays matched)', async () => {
+    // With no online driver in the test, the dispatch service's
+    // findNearestAvailableDriver returns null and the trips stay
+    // matched. We assert the gate fired by checking both readyToFindCab
+    // bits are true.
+    const r1 = await User.create({
+      name: 'R1', phone: '+919000000004', role: 'rider', passwordHash: 'x',
+    });
+    const r2 = await User.create({
+      name: 'R2', phone: '+919000000005', role: 'rider', passwordHash: 'x',
+    });
+    const group = await MatchGroup.create({ trips: [], status: 'forming' });
+    const trip1 = await Trip.create({
+      rider: r1._id, matchGroup: group._id,
+      pickup: { address: 'p', location: pt(BLR) },
+      dropoff: { address: 'd', location: pt({ lat: BLR.lat + 0.05, lng: BLR.lng + 0.05 }) },
+      status: 'matched', readyToFindCab: true, fareEstimate: 200,
+    });
+    const trip2 = await Trip.create({
+      rider: r2._id, matchGroup: group._id,
+      pickup: { address: 'p', location: pt(BLR) },
+      dropoff: { address: 'd', location: pt({ lat: BLR.lat + 0.05, lng: BLR.lng + 0.05 }) },
+      status: 'matched', fareEstimate: 200,
+    });
+    group.trips = [trip1._id, trip2._id];
+    await group.save();
+
+    const r = await call(tripCtrl.findCab, {
+      auth: { userId: r2._id.toString(), role: 'rider' },
+      params: { id: trip2._id.toString() },
+    });
+    expect(r.err).toBeUndefined();
+    expect((await Trip.findById(trip2._id)).readyToFindCab).toBe(true);
+  });
+
+  test('rejects when caller is not the trip rider', async () => {
+    const r1 = await User.create({
+      name: 'R1', phone: '+919000000006', role: 'rider', passwordHash: 'x',
+    });
+    const intruder = await User.create({
+      name: 'Other', phone: '+919000000007', role: 'rider', passwordHash: 'x',
+    });
+    const trip = await Trip.create({
+      rider: r1._id,
+      pickup: { address: 'p', location: pt(BLR) },
+      dropoff: { address: 'd', location: pt({ lat: BLR.lat + 0.05, lng: BLR.lng + 0.05 }) },
+      status: 'matched', fareEstimate: 200,
+    });
+    const r = await call(tripCtrl.findCab, {
+      auth: { userId: intruder._id.toString(), role: 'rider' },
+      params: { id: trip._id.toString() },
+    });
+    expect(r.err).toBeDefined();
+    expect(r.err.status).toBe(403);
+  });
+});

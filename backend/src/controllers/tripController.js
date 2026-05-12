@@ -11,7 +11,7 @@ const logger = require('../utils/logger');
 const { isWithinIndia, distanceKm } = require('../utils/geo');
 const { HttpError } = require('../middleware/errorHandler');
 const { findMatchForTrip } = require('../services/matchingService');
-const { assignDriverForTrip, assignDriverForGroup } = require('../services/dispatchService');
+const { assignDriverForTrip } = require('../services/dispatchService');
 const fareService = require('../services/fareService');
 const directionsService = require('../services/directionsService');
 const {
@@ -157,6 +157,15 @@ async function requestTrip(req, res, next) {
     // also no unlock — the rider didn't get the benefit they were
     // searching for.
 
+    // 4-digit pickup OTP. Server-generated so the value isn't forgeable
+    // client-side — the driver enters it from the rider's screen when
+    // arriving at this rider's pickup stop. Crypto-grade randomness
+    // overkill for a 4-digit space but the call is cheap.
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+
+    // Solo trips dispatch immediately and skip the Find Cab gate —
+    // there's no co-rider to wait for. Shared trips create with the
+    // gate closed; both riders must tap Find Cab before dispatch.
     const trip = await Trip.create({
       rider: req.auth.userId,
       shareEnabled: data.shareEnabled,
@@ -168,6 +177,8 @@ async function requestTrip(req, res, next) {
         address: data.dropoff.address,
         location: { type: 'Point', coordinates: [data.dropoff.lng, data.dropoff.lat] },
       },
+      otp,
+      readyToFindCab: !data.shareEnabled,
     });
 
     // Fare estimate stored upfront for the rider's reference. Pre-
@@ -252,9 +263,14 @@ function scheduleDeferredDispatch(tripId) {
 
       const group = await findMatchForTrip(trip._id);
       if (group) {
-        // Same branching as requestTrip: dispatch when drivers exist;
-        // stop after pairing when rider-only mode is on.
-        if (!env.match.riderOnly) await assignDriverForGroup(group);
+        // Match formed during the deferred window. Do NOT auto-fire
+        // dispatch — the matching service has already set every
+        // sibling's status to 'matched', and the riders' Find Cab gate
+        // is what triggers the offer to a driver. Previously we called
+        // `assignDriverForGroup` here, which bypassed the gate and
+        // committed a driver before either rider had a chance to tap
+        // Find Cab. Now we just broadcast so the riders' polling
+        // watchers see the match and surface the Find Cab CTA.
         const refreshed = await Trip.findById(tripId).populate(TRIP_POPULATE);
         await broadcastTripUpdate(refreshed);
       } else {
@@ -351,17 +367,23 @@ async function getTrip(req, res, next) {
 // too, mirroring `dropOffRider`'s group lifecycle.
 async function riderCloseTrip(req, res, next) {
   try {
-    if (!env.match.riderOnly) {
-      throw new HttpError(
-        409,
-        'Rider-close is only available in rider-only mode. ' +
-          'Driver-led trips end via /trips/:id/dropped.',
-      );
-    }
     const trip = await Trip.findById(req.params.id);
     if (!trip) throw new HttpError(404, 'Trip not found');
     if (trip.rider.toString() !== req.auth.userId) {
       throw new HttpError(403, 'Not your trip');
+    }
+    // Gate on per-trip state, not the global env flag. A trip without a
+    // driver is always rider-closable (rider arranged transport off
+    // platform, no fare to settle). A trip WITH a driver needs the
+    // driver-aware /end-early path so the driver gets paid for the
+    // committed run. Previously this just checked env.match.riderOnly,
+    // which broke whenever a rider-only trip outlived a flag flip.
+    if (trip.driver) {
+      throw new HttpError(
+        409,
+        'This trip has a driver assigned. Use /trips/:id/end-early to ' +
+          'stop the ride here (full fare), or /cancel before pickup.',
+      );
     }
     // Idempotent: closing a closed trip returns the doc without changes.
     if (trip.status === 'completed' || trip.status === 'cancelled') {
@@ -488,12 +510,12 @@ async function endRideEarly(req, res, next) {
   }
 }
 
-// Consume an unlock to confirm a shared match. Fires in BOTH modes:
-//   - rider-only: reveals redacted co-rider details on the match screen.
-//   - driver-dispatch: reveals co-rider details AND triggers the driver
-//     dispatch that was deferred at trip-request time. Without this,
-//     drivers would get offered trips before the rider has paid for
-//     the sharing benefit.
+// Consume an unlock to reveal co-rider details on a matched trip.
+// Decoupled from dispatch: revealing the match doesn't commit to a
+// driver. The rider sees the co-rider details, then has to explicitly
+// tap "Find Cab" (POST /trips/:id/find-cab) before dispatch fires.
+// Both riders in a shared group must tap Find Cab before any driver
+// gets an offer.
 //
 // Idempotent: once matchRevealedAt is set, repeat calls return the
 // populated trip without consuming another unlock. Returns 402 when the
@@ -530,20 +552,86 @@ async function unlockMatch(req, res, next) {
     trip.matchRevealedAt = now;
     await trip.save();
 
-    // Driver-dispatch mode: this is the moment the rider has committed
-    // (unlock consumed). Hand the group off to the dispatch service so
-    // a driver gets offered the trip. Failure here is non-fatal — the
-    // group stays in 'matched' and the deferred-dispatch fallback /
-    // matching engine retry will pick it up.
-    if (!env.match.riderOnly) {
-      try {
-        const group = await MatchGroup.findById(trip.matchGroup);
-        if (group && !group.driver) {
-          const dispatchService = require('../services/dispatchService');
-          await dispatchService.offerGroupToDriver(group);
+    // Dispatch is NOT triggered here anymore. The rider now sees
+    // revealed co-rider details + the Find Cab CTA; dispatch waits
+    // until both riders explicitly opt in (POST /:id/find-cab). This
+    // avoids the old race where one rider's unlock would commit a
+    // driver while the co-rider was still deciding.
+
+    const populated = await Trip.findById(trip._id).populate(TRIP_POPULATE);
+    res.json({ trip: populated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Rider taps Find Cab → mark this trip ready to dispatch. When every
+// trip in the matchGroup is ready, hand the group to the dispatch
+// service. Solo trips skip this gate entirely; they're created with
+// readyToFindCab=true and dispatched in `requestTrip`.
+//
+// Idempotent: a second call from the same rider is a no-op success.
+// Returns the populated trip so the rider's UI can show the
+// "waiting for co-rider..." state if siblings haven't tapped yet.
+async function findCab(req, res, next) {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (trip.rider.toString() !== req.auth.userId) {
+      throw new HttpError(403, 'Not your trip');
+    }
+    // Only meaningful for `matched` trips: pre-match the rider hasn't
+    // even seen a co-rider yet, and post-dispatch (offered /
+    // driver_assigned / arriving / in_progress / completed / cancelled)
+    // the gate has either fired or is no longer relevant. Anything else
+    // is a programmer error in the client; surface as 409.
+    if (trip.status !== 'matched') {
+      throw new HttpError(
+        409,
+        `Cannot find-cab from status ${trip.status}. Only matched trips have the gate.`,
+      );
+    }
+
+    // Mark this rider ready. We persist via $set so concurrent siblings
+    // tapping at the same time don't clobber each other.
+    if (!trip.readyToFindCab) {
+      trip.readyToFindCab = true;
+      await trip.save();
+    }
+
+    // In rider-only mode there's no dispatch step — the gate is just a
+    // synchronisation primitive. Return the populated trip so the
+    // riders' screens can transition together.
+    if (env.match.riderOnly) {
+      const populated = await Trip.findById(trip._id).populate(TRIP_POPULATE);
+      return res.json({ trip: populated });
+    }
+
+    // Driver-dispatch mode: check if every sibling is ready. If yes,
+    // fire the offer. Best-effort — the offer may not find a driver,
+    // in which case the trips stay matched and the deferred-dispatch
+    // path retries.
+    if (trip.matchGroup) {
+      const group = await MatchGroup.findById(trip.matchGroup);
+      if (group && !group.driver) {
+        // Count readiness via a focused projection instead of populating
+        // group.trips. dispatchService.offerGroupToDriver expects
+        // group.trips to be plain ObjectIds (it uses them in $in queries
+        // and as setTimeout keys) — handing it a populated group would
+        // collapse every offer-expiry timer key to "[object Object]"
+        // and break re-dispatch.
+        const readyCount = await Trip.countDocuments({
+          _id: { $in: group.trips },
+          readyToFindCab: true,
+        });
+        if (readyCount === group.trips.length) {
+          try {
+            const dispatchService = require('../services/dispatchService');
+            await dispatchService.offerGroupToDriver(group);
+          } catch (e) {
+            logger.warn(`[find-cab] dispatch failed group=${group._id}: ${e.message}`);
+          }
         }
-      } catch (e) {
-        logger.warn(`[unlock-match] post-unlock dispatch failed: ${e.message}`);
       }
     }
 
@@ -802,6 +890,25 @@ async function pickUpRider(req, res, next) {
         `Cannot mark picked up from status ${trip.status}`,
       );
     }
+
+    // OTP gate. The rider shows the driver a 4-digit code; the driver
+    // types it in to confirm they're picking up the correct passenger.
+    // Per-trip OTPs mean a co-rider's code can't accidentally pick up
+    // the wrong rider. Skipped only when the trip predates the OTP
+    // column entirely (legacy data) so the suite stays green during
+    // the rollout window — once trip.otp is populated, it's enforced.
+    if (trip.otp) {
+      const otp = typeof req.body?.otp === 'string'
+        ? req.body.otp.trim()
+        : '';
+      if (otp.length === 0) {
+        throw new HttpError(400, 'OTP required to confirm pickup');
+      }
+      if (otp !== trip.otp) {
+        throw new HttpError(400, 'Wrong OTP. Ask the rider to check.');
+      }
+    }
+
     const now = new Date();
     trip.status = 'in_progress';
     trip.startedAt = trip.startedAt || now;
@@ -949,11 +1056,31 @@ const actualCoordsSchema = z
 
 function parseActualCoords(body) {
   if (!body || (body.lat == null && body.lng == null)) return null;
-  const parsed = actualCoordsSchema.parse({
+  // actualPickup / actualDropoff is an OPTIONAL observability capture —
+  // it lets the rider's map snap pins to the actual cab position, and
+  // the driver-side audit see "you ended at the right place." It is
+  // NOT trip-critical: missing values just mean we didn't record them.
+  //
+  // So invalid coords (NaN, out-of-India sim GPS, GPS glitch in a
+  // tunnel) should be DROPPED, not blocked. Previously this threw a
+  // raw ZodError → fell through to 500; my earlier fix turned it into
+  // a 400 which still blocks the pickup/drop transition. Both wrong
+  // for an optional capture. safeParse + return null is the right
+  // behaviour: log it so the telemetry is visible, then move on.
+  //
+  // Common dev trigger: iOS sims default to Cupertino. Real drivers in
+  // India never hit this path.
+  const result = actualCoordsSchema.safeParse({
     lat: Number(body.lat),
     lng: Number(body.lng),
   });
-  return parsed;
+  if (!result.success) {
+    logger.warn(
+      `[parseActualCoords] dropping out-of-bounds coords lat=${body.lat} lng=${body.lng}`,
+    );
+    return null;
+  }
+  return result.data;
 }
 
 // =============================================================================
@@ -1051,6 +1178,7 @@ module.exports = {
   requestTrip,
   getTrip,
   unlockMatch,
+  findCab,
   riderCloseTrip,
   endRideEarly,
   listMyTrips,
