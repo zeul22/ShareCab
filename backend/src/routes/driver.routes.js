@@ -10,6 +10,9 @@ const {
   startSubscriptionOrder,
   confirmSubscription,
   onboardDriver,
+  getMyOffer,
+  acceptOffer,
+  rejectOffer,
 } = require('../controllers/driverController');
 
 // Driver-app onboarding wizard target. Requires a valid session but NOT
@@ -34,6 +37,15 @@ router.get('/me', requireAuth, getMyDriver);
 // Currently-dispatched trip(s) for the requesting driver. Empty list when
 // they're online but unassigned; the client polls this on a tick.
 router.get('/me/dispatch', requireAuth, requireRole('driver'), getMyDispatch);
+
+// Pending offer for the driver's IncomingOfferSheet. 204 when no offer
+// is outstanding — cheap polling signal at 3s cadence on the home screen.
+router.get('/me/offer', requireAuth, requireRole('driver'), getMyOffer);
+
+// Accept / reject lifecycle on a specific offered trip. Backend's
+// dispatchService handles state transitions + re-dispatch on reject.
+router.post('/offers/:tripId/accept', requireAuth, requireRole('driver'), acceptOffer);
+router.post('/offers/:tripId/reject', requireAuth, requireRole('driver'), rejectOffer);
 
 // Subscription lifecycle. /me/subscription must be declared before any
 // param-rich routes so Express doesn't accidentally route 'me' as an id.

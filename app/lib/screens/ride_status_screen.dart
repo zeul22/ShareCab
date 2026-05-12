@@ -6,6 +6,7 @@ import '../models/driver_live_location.dart';
 import '../models/ride.dart';
 import '../models/route_stop.dart';
 import '../routes.dart';
+import '../services/api/ride_api.dart';
 import '../services/ride_flow.dart';
 import '../services/route_service.dart';
 import '../services/trip_tracking_service.dart';
@@ -191,6 +192,12 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
               ),
             ),
             _RideCard(ride: ride),
+            // Rider-initiated end. Only meaningful once the ride is
+            // actually underway — pre-pickup, /cancel is the right tool
+            // (no charge). Mid-ride, /end-early stops the cab here and
+            // charges the full pre-quoted fare.
+            if (ride.status == RideStatus.inProgress)
+              _EndRideButton(ride: ride),
           ],
         ),
       ),
@@ -342,6 +349,98 @@ class _EtaChip extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "End ride here" — rider-initiated early end while in_progress.
+/// Confirmation dialog is non-skippable so the rider can't fat-thumb
+/// past the "full fare, no refund" notice. On confirm, hits
+/// /trips/:id/end-early, then auto-advances to the payment screen the
+/// next time the polling watcher sees status=completed.
+class _EndRideButton extends StatefulWidget {
+  final Ride ride;
+  const _EndRideButton({required this.ride});
+
+  @override
+  State<_EndRideButton> createState() => _EndRideButtonState();
+}
+
+class _EndRideButtonState extends State<_EndRideButton> {
+  bool _busy = false;
+
+  Future<void> _confirm() async {
+    final fare = widget.ride.perRiderFare;
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('End the ride here?'),
+        content: Text(
+          'You\'ll be charged the full fare of ₹${fare.toStringAsFixed(0)} '
+          '— no refund for the part you didn\'t ride. The driver continues '
+          'with any co-riders.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text('Keep riding'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('End ride'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final api = context.read<RideApi>();
+    setState(() => _busy = true);
+    try {
+      await api.endRideEarly(widget.ride.id);
+      // Don't navigate here — the polling watcher in RideFlowState picks
+      // up the status=completed flip on its next tick and the screen's
+      // existing "completed → push payment" branch (in build) fires.
+      // Reduces flow paths to maintain.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      child: OutlinedButton.icon(
+        onPressed: _busy ? null : _confirm,
+        icon: _busy
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2.4),
+              )
+            : const Icon(Icons.stop_circle_outlined, color: Colors.red),
+        label: Text(
+          _busy ? 'Ending ride…' : 'End ride here',
+          style: TextStyle(
+            color: _busy ? Colors.black54 : Colors.red.shade700,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: Colors.red.shade300),
+          minimumSize: const Size.fromHeight(48),
+        ),
       ),
     );
   }

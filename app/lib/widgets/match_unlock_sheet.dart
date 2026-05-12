@@ -36,7 +36,11 @@ class MatchUnlockFailed extends MatchUnlockResult {
 /// Sheet manages its own state (ad counter, busy flag, error banner).
 /// Caller just awaits the [show] future and acts on the result.
 class MatchUnlockSheet extends StatefulWidget {
-  final String tripId;
+  /// Trip to consume the unlock against on success. Null when the sheet
+  /// is opened PRE-TRIP (driver-dispatch mode, 402 from /trips) — in
+  /// that case we just MINT the unlock and the next /trips call picks
+  /// it up automatically via the backend's findOneAndUpdate consumption.
+  final String? tripId;
   /// How many rewarded ads the rider needs to watch. Source of truth
   /// is the backend's adsRequiredForRating; UI mirror is fine here
   /// because the backend re-validates.
@@ -46,16 +50,17 @@ class MatchUnlockSheet extends StatefulWidget {
 
   const MatchUnlockSheet({
     super.key,
-    required this.tripId,
+    this.tripId,
     this.adsRequired = 2,
     this.unlockPricePaise = 5000,
   });
 
   /// Convenience launcher. Returns the outcome so the caller doesn't
-  /// have to handle the showModalBottomSheet plumbing.
+  /// have to handle the showModalBottomSheet plumbing. Pass `tripId: null`
+  /// for the pre-trip mint flow (driver-dispatch mode).
   static Future<MatchUnlockResult> show(
     BuildContext context, {
-    required String tripId,
+    String? tripId,
     int adsRequired = 2,
     int unlockPricePaise = 5000,
   }) async {
@@ -126,7 +131,15 @@ class _MatchUnlockSheetState extends State<MatchUnlockSheet> {
   Future<void> _finalizeUnlockViaAds() async {
     try {
       await _api.recordAdRewardForUnlock(adsCompleted: _adsWatched);
-      await _api.unlockMatchForTrip(widget.tripId);
+      // tripId == null → pre-trip mint flow (driver-dispatch mode 402
+      // recovery). Just leave the freshly-minted Unlock in the
+      // collection; the next /trips POST consumes it via the backend's
+      // findOneAndUpdate. tripId != null → rider-only mode, consume
+      // against the specific matched trip.
+      final tid = widget.tripId;
+      if (tid != null) {
+        await _api.unlockMatchForTrip(tid);
+      }
       if (!mounted) return;
       Navigator.of(context).pop(const MatchUnlockedSuccess());
     } catch (e) {
@@ -167,7 +180,12 @@ class _MatchUnlockSheetState extends State<MatchUnlockSheet> {
       final result = await checkout.pay(user: user);
       switch (result) {
         case UnlockCheckoutSuccess():
-          await _api.unlockMatchForTrip(widget.tripId);
+          // Same null-tripId branch as the ad path. Pre-trip mode: skip
+          // the consume call; next /trips picks up the new Unlock.
+          final tid = widget.tripId;
+          if (tid != null) {
+            await _api.unlockMatchForTrip(tid);
+          }
           if (!mounted) return;
           Navigator.of(context).pop(const MatchUnlockedSuccess());
         case UnlockCheckoutCancelled():

@@ -52,6 +52,34 @@ The naïve version reads like the academic paper version of ride-sharing matchin
 
 These would matter at a different scale. They don't matter now.
 
+## Driver dispatch — offer / accept / reject
+
+Drivers don't get trips dropped on them. The matching engine **offers** the trip to the nearest online driver and waits for an explicit accept or reject. If the driver doesn't respond within the timeout window, we treat it as a reject and re-dispatch to the next-nearest driver.
+
+State machine per trip:
+
+```
+requested ─offerTripToDriver──► offered  ─acceptOffer──► driver_assigned
+                                    │
+                                    ├─rejectOffer──► requested (re-offer, skip rejector)
+                                    └─expiry timer──► requested (re-offer)
+```
+
+Tunables (env):
+
+| Key | Default | Effect |
+|---|---|---|
+| `DISPATCH_OFFER_TIMEOUT_MS` | `15000` | How long the driver has to accept/reject before we auto-reject. Mirrors Uber/Ola. |
+| `DISPATCH_RADIUS_METERS` | `5000` | Max distance the nearest-driver query looks. |
+
+Driver app polls `GET /drivers/me/offer` every 3 seconds while online + unassigned (cadence drops to 12s once a trip is accepted). The poll surfaces an `IncomingOfferSheet` — bottom modal with countdown ring, fare estimate, and Accept / Reject buttons. The local countdown matches `Trip.offerExpiresAt` so the UI never lies about how much time is left.
+
+`Trip.rejectedBy` accumulates drivers who declined this trip — the re-dispatch query skips them so the same driver never sees the same offer twice in a row. Cleared on final acceptance.
+
+Implementation: [backend/src/services/dispatchService.js](../backend/src/services/dispatchService.js), [driver/lib/widgets/incoming_offer_sheet.dart](../driver/lib/widgets/incoming_offer_sheet.dart).
+
+**Known limitation:** offer-expiry timers are in-memory `setTimeout`s in the Node process. A process restart loses pending offers; affected riders see "still searching" and fall back to the next match-pass pickup. A persistent queue (BullMQ / Cloud Tasks) is the post-launch upgrade once we have actual traffic.
+
 ## Rider-only mode
 
 When `MATCH_RIDER_ONLY=true`:

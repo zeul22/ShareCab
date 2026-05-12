@@ -79,11 +79,13 @@ class HttpRideApi implements RideApi {
   ) async {
     if (!search.isReadyToSearch) return const [];
 
-    // Mint an unlock first (backend gates shareEnabled=true on this).
-    // Real prod would only run after the rider watched 2 rewarded ads OR
-    // completed a Razorpay payment.
-    await _mintAdUnlockForCurrentRider();
-
+    // No more auto-mint! The previous build pretended "2 ads completed"
+    // here, which silently bypassed the real ad/payment flow. Trip
+    // creation is now always free — the rider pays (ads OR Razorpay)
+    // AFTER a co-rider match is confirmed, via the
+    // [MatchUnlockSheet] surfaced from MatchResultScreen on
+    // `proposal.gatedUnlock=true`. See `tripController.unlockMatch`.
+    //
     // Create the trip and return the initial state immediately. The caller
     // (RideFlowState / SearchingScreen) is responsible for polling via
     // [getLiveRide] until either the proposal's riderCount goes >=2 (match
@@ -233,6 +235,11 @@ class HttpRideApi implements RideApi {
   }
 
   @override
+  Future<void> endRideEarly(String tripId) async {
+    await _post('/trips/$tripId/end-early', const {}, auth: true);
+  }
+
+  @override
   Future<DriverLocationResponse> getDriverLocation(String tripId) async {
     final res = await _get('/trips/$tripId/driver-location', auth: true);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -277,18 +284,6 @@ class HttpRideApi implements RideApi {
 
   Future<void> _cancelTrip(String tripId) async {
     await _post('/trips/$tripId/cancel', const {}, auth: true);
-  }
-
-  Future<void> _mintAdUnlockForCurrentRider() async {
-    final riderId = _riderIdGetter();
-    if (riderId == null) {
-      throw Exception('Not signed in — cannot mint unlock');
-    }
-    await _post('/unlocks/ad-reward', {
-      'riderId': riderId,
-      'adsCompleted': 2,
-      'externalRef': 'app-${DateTime.now().millisecondsSinceEpoch}',
-    });
   }
 
   Future<http.Response> _post(String path, Map<String, dynamic> body, {bool auth = false}) async {

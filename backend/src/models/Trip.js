@@ -1,11 +1,12 @@
 const mongoose = require('mongoose');
 
 const TRIP_STATUSES = [
-  'requested',     // rider has requested, awaiting match / driver
-  'matched',       // matched into a MatchGroup with co-rider(s)
-  'driver_assigned',
-  'arriving',      // driver en route to pickup
-  'in_progress',   // ride underway
+  'requested',       // rider has requested, awaiting match / driver
+  'matched',         // matched into a MatchGroup with co-rider(s)
+  'offered',         // dispatched to ONE driver, awaiting their accept/reject
+  'driver_assigned', // driver accepted; cab is committed
+  'arriving',        // driver en route to pickup
+  'in_progress',     // ride underway
   'completed',
   'cancelled',
 ];
@@ -15,6 +16,24 @@ const tripSchema = new mongoose.Schema(
     rider: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     driver: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver', default: null, index: true },
     matchGroup: { type: mongoose.Schema.Types.ObjectId, ref: 'MatchGroup', default: null, index: true },
+
+    // Outstanding offer state. Populated when status='offered': the trip
+    // has been dispatched to ONE driver and is waiting for their explicit
+    // accept/reject (or the offer-expiry timer to fire and re-dispatch).
+    // Cleared on accept (status flips to driver_assigned) or reject
+    // (status flips back to 'requested' for re-dispatch). Flat fields
+    // rather than a sub-document so we can $set/$unset atomically.
+    offeredTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Driver',
+      default: null,
+      index: true,
+    },
+    offerExpiresAt: { type: Date, default: null },
+    // Drivers who already rejected this trip. Keeps the re-dispatch loop
+    // from re-offering to the same driver. Cleared on final assignment
+    // (driver_assigned) so a later cancel-and-rebook flow starts fresh.
+    rejectedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Driver' }],
 
     pickup: {
       address: String,

@@ -93,6 +93,12 @@ abstract class RideApi {
   /// last sibling closes too. Idempotent. 409 outside rider-only mode.
   Future<void> closeRiderTrip(String tripId);
 
+  /// Driver-dispatch mode: rider stops the ride at their current location
+  /// while it's `in_progress`. Charges the FULL pre-quoted fare — no
+  /// proration. Pulls the trip from the driver's activeTrips; siblings
+  /// in a shared cab keep going. Idempotent. 409 outside `in_progress`.
+  Future<void> endRideEarly(String tripId);
+
   /// Live driver position + ETA to the next pending stop. Used by
   /// [TripTrackingService] to drive the live-ride screen's driver marker
   /// + ETA chip. Polled every 5s during `arriving` / `in_progress`.

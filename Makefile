@@ -23,7 +23,24 @@ API_URL     ?= http://localhost:4000
         backend backend-test backend-e2e \
         seed \
         app-deps app-android app-ios app-analyze \
+        r1 r2 d1 run-sim \
+        loc loc-r1 loc-r2 loc-d1 loc-clear set-sim-location \
         dev stop clean
+
+# -----------------------------------------------------------------------------
+# Named iPhone 16e simulators used for multi-device flow testing.
+# Lifted to top-level so both the `run-sim` and `loc*` recipes share them.
+# -----------------------------------------------------------------------------
+RIDER_A_SIM := iPhone 16e (Rider A)
+RIDER_B_SIM := iPhone 16e (Rider B)
+DRIVER_SIM  := iPhone 16e (Driver)
+
+# Default coords for `make loc`. Picked Indiranagar, Bangalore — central
+# enough that matched riders + a nearby driver all fall inside the 2-4 km
+# pickup/drop bands the matching engine uses. Override per-invocation:
+#   make loc LAT=12.9352 LNG=77.6245   # Koramangala
+LAT ?= 12.9784
+LNG ?= 77.6408
 
 # -----------------------------------------------------------------------------
 # Help — print every target with its `## description` annotation.
@@ -134,6 +151,121 @@ app-ios: ## Run app on the iOS simulator (must be booted)
 
 app-analyze: ## Static analysis on the Flutter app
 	@cd app && flutter analyze
+
+# -----------------------------------------------------------------------------
+# Multi-device flow testing (iPhone 16e × 3)
+# -----------------------------------------------------------------------------
+# Three named simulators, two riders + one driver, for verifying the
+# matching + dispatch flow end-to-end. Each target auto-boots its
+# simulator (and opens Simulator.app) if not booted, then `flutter run`
+# against its UDID.
+#
+# One-time creation on a fresh machine (runtime id from `simctl list runtimes`):
+#   xcrun simctl create "iPhone 16e (Rider A)" "iPhone 16e" com.apple.CoreSimulator.SimRuntime.iOS-26-3
+#   xcrun simctl create "iPhone 16e (Rider B)" "iPhone 16e" com.apple.CoreSimulator.SimRuntime.iOS-26-3
+#   xcrun simctl create "iPhone 16e (Driver)"  "iPhone 16e" com.apple.CoreSimulator.SimRuntime.iOS-26-3
+#
+# To add an r3, copy the r1 block + create a matching "(Rider C)" sim.
+r1: SIM_NAME = $(RIDER_A_SIM)
+r1: APP_DIR  = app
+r1: ## Run rider app on Rider A simulator
+r1: run-sim
+
+r2: SIM_NAME = $(RIDER_B_SIM)
+r2: APP_DIR  = app
+r2: ## Run rider app on Rider B simulator
+r2: run-sim
+
+d1: SIM_NAME = $(DRIVER_SIM)
+d1: APP_DIR  = driver
+d1: ## Run driver app on Driver simulator
+d1: run-sim
+
+# Shared recipe — looks up the simulator by name, boots it if needed,
+# and `flutter run`s the right app dir against its UDID. The "(name) ("
+# grep filter keeps "iPhone 16e (Rider A)" from matching "iPhone 16e".
+run-sim:
+	@LINE=$$(xcrun simctl list devices | grep -F "$(SIM_NAME) (" | head -1); \
+	if [ -z "$$LINE" ]; then \
+	  echo "✗ Simulator '$(SIM_NAME)' not found."; \
+	  echo "  Create it with:"; \
+	  echo "    xcrun simctl create \"$(SIM_NAME)\" \"iPhone 16e\" \\"; \
+	  echo "      com.apple.CoreSimulator.SimRuntime.iOS-26-3"; \
+	  exit 1; \
+	fi; \
+	UDID=$$(echo "$$LINE" | grep -oE '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}' | head -1); \
+	if ! echo "$$LINE" | grep -q "(Booted)"; then \
+	  echo "↻ Booting $(SIM_NAME)…"; \
+	  xcrun simctl boot "$$UDID" 2>/dev/null || true; \
+	  open -a Simulator; \
+	fi; \
+	echo "📍 Setting location to ($(LAT), $(LNG)) so the app isn't in Cupertino"; \
+	xcrun simctl location "$$UDID" set "$(LAT),$(LNG)" 2>/dev/null || true; \
+	echo "→ flutter run on $(SIM_NAME) ($$UDID)"; \
+	cd $(APP_DIR) && flutter run -d $$UDID \
+	  --dart-define=API_BASE_URL=http://localhost:4000
+
+# -----------------------------------------------------------------------------
+# Simulator GPS overrides
+# -----------------------------------------------------------------------------
+# iOS simulators don't follow the Mac's actual GPS — they have their own
+# Core Location stack. `xcrun simctl location` injects coords directly into
+# the running sim so Geolocator (rider's pickup picker, driver's
+# LocationPushService) reports them.
+#
+# Default: all three sims to the same point (Indiranagar, Bangalore).
+# Override per-call:
+#   make loc LAT=12.9352 LNG=77.6245                # Koramangala
+#   make loc-d1 LAT=12.97 LNG=77.59                 # only the driver
+#
+# Reset to Simulator defaults:
+#   make loc-clear
+#
+# Tip: when testing the matching engine, set both riders to nearby
+# coords (~500m apart) and the driver to within ~2 km. The 2dsphere
+# query needs all three to share rough geography.
+loc: set-sim-location ## Set ALL three sims to (LAT, LNG) — defaults to Bangalore
+	@echo "✓ all three sims now report ($(LAT), $(LNG))"
+
+loc-r1: SIM_NAME = $(RIDER_A_SIM)
+loc-r1: ## Set Rider A simulator GPS to (LAT, LNG)
+loc-r1: set-one-sim-location
+
+loc-r2: SIM_NAME = $(RIDER_B_SIM)
+loc-r2: ## Set Rider B simulator GPS to (LAT, LNG)
+loc-r2: set-one-sim-location
+
+loc-d1: SIM_NAME = $(DRIVER_SIM)
+loc-d1: ## Set Driver simulator GPS to (LAT, LNG)
+loc-d1: set-one-sim-location
+
+loc-clear: ## Clear injected GPS on all three sims
+	@for SIM in "$(RIDER_A_SIM)" "$(RIDER_B_SIM)" "$(DRIVER_SIM)"; do \
+	  UDID=$$(xcrun simctl list devices | grep -F "$$SIM (" | head -1 \
+	    | grep -oE '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}' | head -1); \
+	  [ -z "$$UDID" ] && { echo "✗ $$SIM not found"; continue; }; \
+	  xcrun simctl location "$$UDID" clear 2>/dev/null || true; \
+	  echo "✓ $$SIM cleared"; \
+	done
+
+# Internal: push (LAT, LNG) to all three sims.
+set-sim-location:
+	@for SIM in "$(RIDER_A_SIM)" "$(RIDER_B_SIM)" "$(DRIVER_SIM)"; do \
+	  UDID=$$(xcrun simctl list devices | grep -F "$$SIM (" | head -1 \
+	    | grep -oE '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}' | head -1); \
+	  if [ -z "$$UDID" ]; then echo "✗ $$SIM not found — skipping"; continue; fi; \
+	  xcrun simctl location "$$UDID" set "$(LAT),$(LNG)"; \
+	done
+
+# Internal: push (LAT, LNG) to ONE named sim via $(SIM_NAME).
+set-one-sim-location:
+	@UDID=$$(xcrun simctl list devices | grep -F "$(SIM_NAME) (" | head -1 \
+	  | grep -oE '[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}' | head -1); \
+	if [ -z "$$UDID" ]; then \
+	  echo "✗ Simulator '$(SIM_NAME)' not found"; exit 1; \
+	fi; \
+	xcrun simctl location "$$UDID" set "$(LAT),$(LNG)"; \
+	echo "✓ $(SIM_NAME) now reports ($(LAT), $(LNG))"
 
 # -----------------------------------------------------------------------------
 # Composite targets

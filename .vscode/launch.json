@@ -147,6 +147,56 @@
       "toolArgs": [
         "--dart-define=API_BASE_URL=http://10.0.2.2:4000"
       ]
+    },
+
+    // -------------------------------------------------------------------
+    // Multi-device flow testing — pinned to specific named simulators so
+    // you can launch two riders + one driver from VS Code and get full
+    // debugger / breakpoint support in three separate debug sessions.
+    //
+    // Each `deviceId` is matched as a substring against `flutter devices`
+    // output. The simulators must exist (one-time create — see Makefile
+    // section "Multi-device flow testing"). VS Code launches each session
+    // in its own Debug Console; ⌘+R / Cmd+\ hot-reload still works per
+    // session, set breakpoints in lib/** as normal.
+    // -------------------------------------------------------------------
+    {
+      "name": "Rider A · iPhone 16e",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "iPhone 16e (Rider A)",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://localhost:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "Rider B · iPhone 16e",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/app",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "iPhone 16e (Rider B)",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://localhost:4000",
+        "--dart-define=GOOGLE_MAPS_KEY=***REMOVED_GOOGLE_MAPS_KEY***"
+      ]
+    },
+    {
+      "name": "Driver D1 · iPhone 16e",
+      "type": "dart",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/driver",
+      "program": "lib/main.dart",
+      "flutterMode": "debug",
+      "deviceId": "iPhone 16e (Driver)",
+      "toolArgs": [
+        "--dart-define=API_BASE_URL=http://localhost:4000"
+      ]
     }
   ],
   "compounds": [
@@ -171,6 +221,19 @@
       "configurations": [
         "ShareCab App (Android Emulator)",
         "ShareCab Driver (Android Emulator)"
+      ],
+      "stopAll": true
+    },
+    {
+      // Launch all three iPhone 16e sims at once with full debugger
+      // attach. Make sure the three named simulators exist + are booted
+      // (`make r1` etc bootstraps them; this compound just attaches the
+      // debugger instead of running flutter from the terminal).
+      "name": "ShareCab 2 Riders + 1 Driver (iOS Simulators)",
+      "configurations": [
+        "Rider A · iPhone 16e",
+        "Rider B · iPhone 16e",
+        "Driver D1 · iPhone 16e"
       ],
       "stopAll": true
     }

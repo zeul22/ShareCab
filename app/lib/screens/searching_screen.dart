@@ -125,6 +125,10 @@ class _SearchingScreenState extends State<SearchingScreen>
   Widget build(BuildContext context) {
     final flow = context.watch<RideFlowState>();
     final airport = flow.search.airportArrivalMode;
+    // Note: the unlock sheet (ads or Razorpay) is shown POST-match by
+    // MatchResultScreen — there's no pre-trip gate to handle here.
+    // Trip creation is free; the rider only pays once a co-rider
+    // actually pairs up.
 
     // Intercept hardware / gesture back so it behaves the same as the
     // AppBar leading button: pop straight home, leave the search alive

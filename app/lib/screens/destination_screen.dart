@@ -33,7 +33,35 @@ class _DestinationScreenState extends State<DestinationScreen> {
   void initState() {
     super.initState();
     // Defer to the first frame so context.read works.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadRecents());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadRecents();
+      _autoSetPickupToCurrent();
+    });
+  }
+
+  /// Auto-commit the rider's current GPS as the pickup if they haven't
+  /// chosen one explicitly. Without this the screen renders the current
+  /// location in the pickup tile but `flow.search.pickup` stays null,
+  /// so the rider taps Continue assuming current location is selected
+  /// and the backend ends up without a pickup. Tapping the pickup tile
+  /// still opens the map picker — this is just the default.
+  Future<void> _autoSetPickupToCurrent() async {
+    final flow = context.read<RideFlowState>();
+    if (flow.search.pickup != null) return; // user already chose
+    final locService = context.read<LocationService>();
+    // Cached value first (HomeScreen fetched it on launch). If the user
+    // somehow landed here without that cache priming — direct nav, race
+    // — request a fresh fix. Permission denials are silent: rider falls
+    // back to manual map-picker, which still works.
+    Place? current = locService.current;
+    current ??= await locService.fetchCurrent();
+    if (current == null || !mounted) return;
+    // Re-check after the await — a fast-fingered rider could have tapped
+    // the pickup tile and chosen a different point while we were
+    // resolving GPS.
+    if (flow.search.pickup == null) {
+      flow.setPickup(current);
+    }
   }
 
   Future<void> _loadRecents() async {
@@ -128,7 +156,10 @@ class _DestinationScreenState extends State<DestinationScreen> {
               _PointTile(
                 label: 'Pickup',
                 place: pickup,
-                emptyHint: 'Tap to set pickup',
+                // Soft hint while GPS is still resolving — usually < 1s
+                // since HomeScreen primed the location cache on launch.
+                // Tapping the tile still opens the map picker.
+                emptyHint: 'Detecting your current location…',
                 dotColor: AppTheme.brand,
                 onTap: () => pick(isPickup: true),
               ),

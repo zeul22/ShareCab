@@ -923,6 +923,12 @@ class _GeofenceBanner extends StatelessWidget {
               backgroundColor: Colors.white,
               foregroundColor: AppTheme.brand,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              // Theme defaults to Size.fromHeight(52) (= infinity width)
+              // for full-width screen buttons. Inside this Row we want a
+              // content-sized button instead — these two lines reset the
+              // minimum so the button shrinks to fit its label.
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),

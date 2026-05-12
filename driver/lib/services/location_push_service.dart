@@ -52,8 +52,10 @@ class LocationPushService extends ChangeNotifier {
   /// Begin ticking. Requests location permission on first call. Safe to
   /// call repeatedly — a no-op when already running.
   Future<void> start() async {
+    debugPrint('[location] start() — running=$_running interval=${_interval.inSeconds}s');
     if (_running) return;
     final ok = await _ensurePermission();
+    debugPrint('[location] permission ok=$ok');
     if (!ok) {
       _lastError = 'Location permission not granted';
       notifyListeners();
@@ -66,6 +68,7 @@ class LocationPushService extends ChangeNotifier {
     // after the toggle. Future ticks happen on the timer.
     unawaited(_pingOnce());
     _ticker = Timer.periodic(_interval, (_) => _pingOnce());
+    debugPrint('[location] ticker armed');
   }
 
   /// Switch to the 5s tight cadence (active trip). Idempotent — restarts
@@ -123,6 +126,7 @@ class LocationPushService extends ChangeNotifier {
   }
 
   Future<void> _pingOnce() async {
+    debugPrint('[location] _pingOnce()');
     if (!_running) return;
     try {
       // medium accuracy is plenty for the matching engine's km-scale

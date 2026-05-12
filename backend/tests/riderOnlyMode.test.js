@@ -422,13 +422,19 @@ describe('driver-dispatch mode unaffected', () => {
   // suite is in driverDispatch.test.js — this is just a smoke check.)
   beforeEach(() => { env.match.riderOnly = false; });
 
-  test('requestTrip with shareEnabled requires an unlock', async () => {
+  // Trip creation no longer requires an upfront unlock in either mode.
+  // The unlock gate moved to /trips/:id/unlock-match (post-match) so
+  // we don't charge the rider before they actually have a co-rider to
+  // share with. Both ad and pay paths still gate behind that endpoint;
+  // see unlockGate.test.js for the consume mechanics.
+  test('requestTrip with shareEnabled succeeds without upfront unlock', async () => {
     const rider = await makeRider();
     const r = await call(tripCtrl.requestTrip, {
       auth: { userId: rider._id.toString(), role: 'rider' },
       body: tripBody({ pickup: BLR, drop: nudgeKm(4) }),
     });
-    expect(r.err).toBeDefined();
-    expect(r.err.status).toBe(402);
+    expect(r.err).toBeUndefined();
+    expect(r.res.body.trip).toBeDefined();
+    expect(r.res.body.trip.status).toBe('requested');
   });
 });
