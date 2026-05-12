@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
+import '../models/driver_live_location.dart';
 import '../models/ride.dart';
 import '../models/route_stop.dart';
 import '../routes.dart';
 import '../services/ride_flow.dart';
 import '../services/route_service.dart';
+import '../services/trip_tracking_service.dart';
 import '../theme/app_theme.dart';
 
 /// Live ride status. After confirmation, the rider sits here while the cab
@@ -31,10 +33,29 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
   List<LatLng>? _roadPoints;
   String? _lastFingerprint;
 
+  /// The trip id the tracker is currently watching. Tracked locally so
+  /// we restart the poll if the ride id changes mid-screen (e.g. the
+  /// user returned from completed → new ride without the screen unmounting).
+  String? _trackedTripId;
+
   @override
   void dispose() {
     _map?.dispose();
+    // Stop the tracker so it doesn't keep polling after the user leaves
+    // this screen. Idempotent — safe even if start() was never called.
+    context.read<TripTrackingService>().stop();
     super.dispose();
+  }
+
+  void _ensureTracking(String tripId) {
+    if (_trackedTripId == tripId) return;
+    _trackedTripId = tripId;
+    // Defer to a post-frame callback so we don't trigger notifyListeners
+    // (from inside start()) during a build pass.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<TripTrackingService>().start(tripId);
+    });
   }
 
   Future<void> _fetchRoute(List<LatLng> stops) async {
@@ -77,6 +98,15 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
     if (ride == null) {
       return const Scaffold(body: Center(child: Text('No active ride.')));
     }
+
+    // Start (or re-target) the live tracker for this ride. Idempotent;
+    // a no-op when already tracking the same id.
+    _ensureTracking(ride.id);
+
+    // Listen on the tracker so the driver marker + ETA chip re-render
+    // on each 5s tick. Watching here (not in dispose / lifecycle) keeps
+    // the dependency explicit + scoped to the build.
+    final tracker = context.watch<TripTrackingService>();
 
     // Polling watcher just told us the rider is now solo. Pop a dialog
     // letting them either continue at the higher solo fare or bail out
@@ -125,6 +155,10 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Live ETA chip — "Driver 4 min away" / "Reaching destination
+            // in 12 min". Self-hides when the tracker has nothing to say
+            // (no driver assigned yet, or non-active states).
+            _EtaChip(eta: tracker.eta),
             Expanded(
               child: GoogleMap(
                 initialCameraPosition:
@@ -138,7 +172,7 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
                 myLocationEnabled: true,
                 myLocationButtonEnabled: false,
                 zoomControlsEnabled: false,
-                markers: _markers(ride),
+                markers: _markers(ride, tracker.driverLocation),
                 polylines: {
                   Polyline(
                     polylineId: const PolylineId('route'),
@@ -203,13 +237,26 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
     }
   }
 
-  Set<Marker> _markers(Ride ride) {
+  Set<Marker> _markers(Ride ride, DriverLiveLocation? driverPos) {
     final markers = <Marker>{};
+
+    // Snap "my pickup" marker to the actual GPS the driver captured
+    // once we've transitioned to in_progress. Before that, show the
+    // requested pickup pin (where the rider tapped at booking time).
+    // Co-rider stops stick to their original requested coords — actuals
+    // for other riders aren't surfaced to this rider.
+    final useActualPickup =
+        ride.status == RideStatus.inProgress && ride.actualPickup != null;
+
     for (final s in ride.proposal.stops) {
+      final isMine = s.passengerId == 'me';
+      final pos = (isMine && s.kind == StopKind.pickup && useActualPickup)
+          ? LatLng(ride.actualPickup!.lat, ride.actualPickup!.lng)
+          : LatLng(s.place.lat, s.place.lng);
       markers.add(
         Marker(
           markerId: MarkerId('${s.kind.name}_${s.passengerId}_${s.order}'),
-          position: LatLng(s.place.lat, s.place.lng),
+          position: pos,
           icon: BitmapDescriptor.defaultMarkerWithHue(
             s.kind == StopKind.pickup
                 ? BitmapDescriptor.hueOrange
@@ -223,7 +270,80 @@ class _RideStatusScreenState extends State<RideStatusScreen> {
         ),
       );
     }
+
+    // Driver cab marker. Only shown when the tracker has a position AND
+    // the ride is in a state where the rider should be looking at it.
+    final showDriver = driverPos != null &&
+        (ride.status == RideStatus.arriving ||
+            ride.status == RideStatus.inProgress);
+    if (showDriver) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: LatLng(driverPos.lat, driverPos.lng),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          flat: true,
+          anchor: const Offset(0.5, 0.5),
+          infoWindow: const InfoWindow(title: 'Your driver'),
+        ),
+      );
+    }
     return markers;
+  }
+}
+
+/// Compact chip above the map that surfaces the live ETA from the
+/// [TripTrackingService]. Hidden when the trip isn't actively heading
+/// somewhere (e.g. matched but no driver yet).
+class _EtaChip extends StatelessWidget {
+  final TripEta? eta;
+  const _EtaChip({required this.eta});
+
+  @override
+  Widget build(BuildContext context) {
+    final e = eta;
+    if (e == null) return const SizedBox.shrink();
+    final mins = e.minutes;
+    final label = e.isToPickup
+        ? (mins <= 1 ? 'Driver almost here' : 'Driver $mins min away')
+        : (mins <= 1 ? 'Arriving now' : 'Reaching destination in $mins min');
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppTheme.brand,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            e.isToPickup ? Icons.directions_car : Icons.flag_outlined,
+            color: Colors.white,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 14,
+            ),
+          ),
+          if (e.isApproximate) ...[
+            const SizedBox(width: 6),
+            const Text(
+              '(approx)',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

@@ -1,8 +1,37 @@
+<p align="center">
+  <img src="./app/assets/appIcon.png" alt="ShareCab app icon" width="120" height="120">
+</p>
+
 # ShareCab
 
-ShareCab is a cab-sharing platform that helps individuals share rides when their destinations are nearby — usually within a **2–4 km radius**. Inspired by Uber, Ola, and Rapido, but focused specifically on short-distance route matching and shared cab usage.
+**ShareCab helps riders heading in the same direction share one cab, split the fare, and travel with better visibility and trust.**
 
-The goal: make everyday cab rides cheaper and more convenient by intelligently matching nearby riders heading in the same direction.
+The product is built for city rides where two or more people have nearby pickup and drop points. Instead of every rider booking a separate cab, ShareCab looks for compatible riders within a practical distance band, groups them into one shared trip, and gives the driver a clear pickup and trip flow.
+
+ShareCab is not just a cheaper taxi clone. It is a cab-sharing system with rider matching, fare splitting, OTP-based pickup safety, driver dispatch, trip tracking, chat, ratings, and payment/unlock flows.
+
+---
+
+## What ShareCab Does
+
+For riders:
+
+- Find a cab-share match for short city trips and airport pickup flows.
+- Match with riders whose destinations are nearby, typically within a configurable **2-4 km radius**.
+- Compare shared and solo ride options before committing.
+- Unlock serious matches through ads or payment so low-intent requests do not flood the system.
+- Confirm pickup with an OTP, chat with the group, track trip status, and rate the experience.
+
+For drivers:
+
+- Go online, receive dispatches, view rider pickup details, and manage the active trip lifecycle.
+- Use pickup OTP verification before starting a ride.
+- Keep access controlled through driver subscription and onboarding flows.
+
+For the platform:
+
+- Run matching, fare calculation, dispatch, authentication, payments, realtime updates, and notifications from one backend.
+- Tune matching rules such as pickup radius, destination radius, detour limits, cab capacity, and luggage constraints.
 
 ---
 
@@ -10,66 +39,66 @@ The goal: make everyday cab rides cheaper and more convenient by intelligently m
 
 ```
 ShareCab/
-├── website/    # Next.js marketing & info website
-├── app/        # Flutter mobile app (rider + driver)
-├── backend/    # Node.js + Express API + matching engine
-└── README.md
+|-- website/    # Next.js marketing and info website
+|-- app/        # Flutter rider app
+|-- driver/     # Flutter driver app
+|-- backend/    # Node.js + Express API, matching engine, and realtime services
+|-- docs/       # Cross-cutting product, architecture, deployment, and API docs
+`-- README.md
 ```
 
-| Part        | Stack                          | Purpose                                              |
-|-------------|--------------------------------|------------------------------------------------------|
-| `website/`  | Next.js (App Router) + Tailwind | Public-facing site: home, how it works, pricing, etc.|
-| `app/`      | Flutter                        | Mobile app for riders and drivers                    |
-| `backend/`  | Node.js + Express + MongoDB    | REST + WebSocket API, matching engine, fare logic    |
+| Part | Stack | Purpose |
+|---|---|---|
+| [website/](./website/) | Next.js App Router + Tailwind | Public ShareCab website. |
+| [app/](./app/) | Flutter | Rider app: phone login, ride planning, matching, unlocks, chat, payment, trip status. |
+| [driver/](./driver/) | Flutter | Driver app: onboarding, online status, dispatch acceptance, pickup OTP, active trip flow. |
+| [backend/](./backend/) | Node.js + Express + MongoDB | REST and WebSocket API, auth, matching, dispatch, fare logic, payments, notifications. |
+
+---
+
+## How The Ride Flow Works
+
+1. A rider enters pickup, destination, luggage, and sharing preferences.
+2. The backend searches for compatible riders near the same route corridor.
+3. ShareCab proposes a shared match when pickup distance, destination distance, detour, vehicle capacity, and luggage rules are acceptable.
+4. The rider unlocks or accepts the match, then receives driver, vehicle, fare, chat, and pickup OTP details.
+5. The driver verifies the pickup OTP, starts the ride, and progresses the trip through completion.
+6. Riders pay, rate the trip, and keep their account session through phone OTP authentication.
+
+---
+
+## Documentation
+
+Start with **[docs/](./docs/)** for cross-cutting context — architecture, deployment, API, runbook.
+
+| If you are… | Read |
+|---|---|
+| A new engineer | [docs/architecture.md](./docs/architecture.md) → [docs/getting-started.md](./docs/getting-started.md) |
+| Shipping to production | [docs/deployment.md](./docs/deployment.md) → [docs/runbook.md](./docs/runbook.md) |
+| Integrating against the API | [docs/api.md](./docs/api.md) → [backend/docs/api.md](./backend/docs/api.md) |
+| Curious about the product | [docs/product.md](./docs/product.md) |
+
+Per-service deep dives live alongside the code: [backend/docs/api.md](./backend/docs/api.md), [app/docs/notifications.md](./app/docs/notifications.md).
 
 ---
 
 ## Quick Start
 
-Each part has its own README with detailed run instructions:
-
-- [website/README.md](./website/README.md)
-- [app/README.md](./app/README.md)
-- [backend/README.md](./backend/README.md)
-
 ```bash
 # 1. Backend
-cd backend && cp .env.example .env && npm install && npm run dev
+cd backend && npm install && npm run dev    # http://localhost:4000
 
-# 2. Website
-cd website && npm install && npm run dev
+# 2. Rider app
+cd app && flutter pub get && flutter run    # iOS sim or Android emu
 
-# 3. Flutter app
-cd app && flutter pub get && flutter run
+# 3. Driver app
+cd driver && flutter pub get && flutter run
+
+# 4. Website
+cd website && npm install && npm run dev    # http://localhost:3000
 ```
 
----
-
-## Architecture Overview
-
-```
-   ┌─────────────┐         ┌─────────────┐
-   │  Flutter    │         │  Next.js    │
-   │   App       │         │  Website    │
-   └──────┬──────┘         └──────┬──────┘
-          │                       │
-          │   REST + WebSockets   │
-          └───────────┬───────────┘
-                      ▼
-              ┌───────────────┐
-              │  Node.js API  │
-              │  + Socket.IO  │
-              └───────┬───────┘
-                      │
-        ┌─────────────┼──────────────┐
-        ▼             ▼              ▼
-  ┌──────────┐  ┌───────────┐  ┌────────────┐
-  │ MongoDB  │  │ Matching  │  │ Notif. /   │
-  │ (geo 2dsphere) │ Engine │  │ Fare svc   │
-  └──────────┘  └───────────┘  └────────────┘
-```
-
-Core domain entities: **Rider**, **Driver**, **Trip**, **MatchGroup**, **Rating**.
+Full setup with env vars + first-run sanity check in [docs/getting-started.md](./docs/getting-started.md).
 
 ---
 

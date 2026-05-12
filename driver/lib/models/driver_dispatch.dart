@@ -46,7 +46,16 @@ class DispatchRider {
   final Place pickup;
   final Place dropoff;
   final DispatchStatus status;
+
+  /// This rider's fare in RUPEES (parsed from the backend paise field).
+  /// Equal to what the rider is charged on their payment screen.
   final double fareEstimate;
+
+  /// Driver's take-home from this rider in RUPEES = total minus the
+  /// GST passthrough. Equal to `fareEstimate` until GST is enabled.
+  /// Available only when the trip carries a structured breakdown
+  /// (post-pricing-rewrite); falls back to `fareEstimate` otherwise.
+  final double driverPayout;
 
   const DispatchRider({
     required this.tripId,
@@ -57,6 +66,7 @@ class DispatchRider {
     required this.dropoff,
     required this.status,
     required this.fareEstimate,
+    required this.driverPayout,
     this.phone,
   });
 
@@ -94,6 +104,15 @@ class DispatchRider {
     } else if (rider is String) {
       riderId = rider;
     }
+    // Backend reports fare in PAISE post pricing-rewrite. Convert to
+    // rupees for display. driverPayout = total minus GST passthrough;
+    // pulled from the breakdown when present, otherwise = fareEstimate
+    // (no GST being collected yet).
+    final farePaise = (trip['fareEstimate'] as num?)?.toInt() ?? 0;
+    final fareRupees = farePaise / 100.0;
+    final breakdown = trip['fareBreakdown'] as Map<String, dynamic>?;
+    final driverPayoutPaise =
+        (breakdown?['driverPayout'] as num?)?.toInt() ?? farePaise;
     return DispatchRider(
       tripId: (trip['_id'] as String?) ?? '',
       riderId: riderId,
@@ -103,7 +122,8 @@ class DispatchRider {
       pickup: Place.fromJson((trip['pickup'] as Map<String, dynamic>?) ?? const {}),
       dropoff: Place.fromJson((trip['dropoff'] as Map<String, dynamic>?) ?? const {}),
       status: DispatchStatus.parse(trip['status'] as String?),
-      fareEstimate: (trip['fareEstimate'] as num?)?.toDouble() ?? 0,
+      fareEstimate: fareRupees,
+      driverPayout: driverPayoutPaise / 100.0,
     );
   }
 }
@@ -151,6 +171,11 @@ class DriverDispatch {
 
   bool get isEmpty => riders.isEmpty;
   bool get isShared => riders.length > 1;
+
+  /// Sum of each rider's take-home contribution. Equal to [totalFare]
+  /// until GST is enabled on the platform; from there it's a few % less.
+  double get totalDriverPayout =>
+      riders.fold<double>(0, (a, r) => a + r.driverPayout);
 
   /// First trip id, used to drive bulk endpoints like `/arrive` that walk
   /// every sibling at once. Per-rider endpoints (`/picked-up`, `/dropped`)

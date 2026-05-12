@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../models/driver.dart';
+import '../../models/driver_live_location.dart';
+import '../../models/fare_breakdown.dart';
 import '../../models/luggage.dart';
 import '../../models/match_proposal.dart';
 import '../../models/passenger.dart';
@@ -212,6 +214,15 @@ class HttpRideApi implements RideApi {
   }
 
   @override
+  Future<UnlockOrder> startUnlockOrder() async {
+    // POST /unlocks/order is authenticated — the backend pulls riderId
+    // from the JWT, not the request body, so we don't need to send it.
+    final res = await _post('/unlocks/order', const {}, auth: true);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return UnlockOrder.fromJson(body);
+  }
+
+  @override
   Future<void> unlockMatchForTrip(String tripId) async {
     await _post('/trips/$tripId/unlock-match', const {}, auth: true);
   }
@@ -219,6 +230,13 @@ class HttpRideApi implements RideApi {
   @override
   Future<void> closeRiderTrip(String tripId) async {
     await _post('/trips/$tripId/rider-close', const {}, auth: true);
+  }
+
+  @override
+  Future<DriverLocationResponse> getDriverLocation(String tripId) async {
+    final res = await _get('/trips/$tripId/driver-location', auth: true);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    return DriverLocationResponse.fromJson(body);
   }
 
   // ---------------------------------------------------------------------------
@@ -426,13 +444,37 @@ class HttpRideApi implements RideApi {
       ));
     }
 
-    final fareEstimate = (trip['fareEstimate'] as num?)?.toDouble() ?? 0.0;
+    // Backend now reports fare in PAISE (post-pricing-rewrite). Divide by
+    // 100 for the legacy rupee-denominated scalars. The structured
+    // breakdown is the source of truth for the new UI; scalars stick
+    // around for backward-compat with screens we haven't migrated.
+    final fareEstimatePaise =
+        (trip['fareEstimate'] as num?)?.toInt() ?? 0;
+    final fareEstimate = fareEstimatePaise / 100.0;
     final distanceKm = (trip['distanceKm'] as num?)?.toDouble() ?? 0.0;
     final durationMin = (trip['durationMin'] as num?)?.toInt() ?? 0;
     final riderCount = coPassengers.length + 1;
-    // Apply the same 30% share discount the backend computes when settling.
-    final groupFare = riderCount > 1 ? fareEstimate * 0.7 * riderCount : fareEstimate;
-    final perRiderFare = groupFare / riderCount;
+
+    final breakdownJson = trip['fareBreakdown'] as Map<String, dynamic>?;
+    final breakdown = breakdownJson != null
+        ? FareBreakdown.fromJson(breakdownJson)
+        : null;
+
+    final double perRiderFare;
+    final double groupFare;
+    if (breakdown != null) {
+      // Backend-computed (authoritative). For shared trips we treat the
+      // breakdown as THIS rider's share; group total is per-rider × N as
+      // a display approximation — true allocations are different per
+      // rider, but the rider only sees their own slice on this screen.
+      perRiderFare = breakdown.totalRupees;
+      groupFare = perRiderFare * riderCount;
+    } else {
+      // Legacy fallback for trips that predate the pricing rewrite —
+      // 30% flat discount, equal split (the old client-side approximation).
+      groupFare = riderCount > 1 ? fareEstimate * 0.7 * riderCount : fareEstimate;
+      perRiderFare = groupFare / riderCount;
+    }
 
     return MatchProposal(
       id: tripId,
@@ -447,6 +489,7 @@ class HttpRideApi implements RideApi {
       luggageSeatsUsed: 0,
       luggageSeatsFree: vehicleType.luggageCapacity,
       gatedUnlock: gatedUnlock,
+      fareBreakdown: breakdown,
     );
   }
 
@@ -466,6 +509,27 @@ class HttpRideApi implements RideApi {
       () => _generateOtp(),
     );
 
+    // Parse `actualPickup` / `actualDropoff` (post-pricing-rewrite trips
+    // carry these once the driver taps pickup/drop with GPS). Backend
+    // shape mirrors `pickup` / `dropoff`: `{ location: { coordinates: [lng, lat] } }`
+    // — Place.fromJson already handles that wrapper shape, just without
+    // the `address` field.
+    Place? parseActual(Map<String, dynamic>? raw) {
+      if (raw == null || raw['location'] == null) return null;
+      try {
+        return Place.fromJson({
+          'address': '',
+          'location': raw['location'],
+        });
+      } catch (_) {
+        return null;
+      }
+    }
+    final actualPickup =
+        parseActual(trip['actualPickup'] as Map<String, dynamic>?);
+    final actualDropoff =
+        parseActual(trip['actualDropoff'] as Map<String, dynamic>?);
+
     return Ride(
       id: tripId,
       proposal: proposal,
@@ -481,6 +545,8 @@ class HttpRideApi implements RideApi {
           : null,
       riders: const [],
       perRiderFare: proposal.perRiderFare,
+      actualPickup: actualPickup,
+      actualDropoff: actualDropoff,
     );
   }
 

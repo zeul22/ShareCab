@@ -154,20 +154,37 @@ class DriverApi {
   /// Per-rider pickup. Pass the *specific* trip id whose rider just
   /// boarded — siblings stay in their current state (e.g. still
   /// `arriving` if not yet picked up).
-  Future<DriverDispatch> markPickedUp(String tripId) =>
-      _lifecycleStep('/trips/$tripId/picked-up');
+  ///
+  /// Optionally include the driver's current GPS so the backend can
+  /// persist `actualPickup` on the trip. The rider's map snaps the
+  /// source pin to this location once the trip flips to in_progress.
+  Future<DriverDispatch> markPickedUp(
+    String tripId, {
+    double? lat,
+    double? lng,
+  }) =>
+      _lifecycleStep('/trips/$tripId/picked-up', lat: lat, lng: lng);
 
   /// Per-rider dropoff. The driver hits this once they've delivered
   /// this rider; the backend settles their fare and pulls them from
   /// `activeTrips`. The whole group only completes when the LAST sibling
-  /// is dropped.
-  Future<DriverDispatch> markDropped(String tripId) =>
-      _lifecycleStep('/trips/$tripId/dropped');
+  /// is dropped. Optional GPS lands on `actualDropoff` for audit.
+  Future<DriverDispatch> markDropped(
+    String tripId, {
+    double? lat,
+    double? lng,
+  }) =>
+      _lifecycleStep('/trips/$tripId/dropped', lat: lat, lng: lng);
 
-  Future<DriverDispatch> _lifecycleStep(String path) async {
-    final res = await _post(path, const {});
-    final body = _decode(res);
-    final trips = (body['trips'] as List?) ?? const [];
+  Future<DriverDispatch> _lifecycleStep(
+    String path, {
+    double? lat,
+    double? lng,
+  }) async {
+    final body = (lat != null && lng != null) ? {'lat': lat, 'lng': lng} : const <String, dynamic>{};
+    final res = await _post(path, body);
+    final decoded = _decode(res);
+    final trips = (decoded['trips'] as List?) ?? const [];
     return DriverDispatch.fromTrips(trips);
   }
 

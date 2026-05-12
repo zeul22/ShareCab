@@ -1,3 +1,4 @@
+import 'fare_breakdown.dart';
 import 'passenger.dart';
 import 'route_stop.dart';
 import 'vehicle.dart';
@@ -42,6 +43,12 @@ class MatchProposal {
   /// False in driver-dispatch mode, where matches are always revealed.
   final bool gatedUnlock;
 
+  /// Structured fare breakdown from the backend (`trip.fareBreakdown`).
+  /// Null when the proposal predates the new pricing engine (legacy
+  /// trip rows) — UI should fall back to the scalar `perRiderFare`
+  /// rendered without component details.
+  final FareBreakdown? fareBreakdown;
+
   const MatchProposal({
     required this.id,
     required this.coPassengers,
@@ -55,6 +62,7 @@ class MatchProposal {
     required this.luggageSeatsFree,
     this.groupId,
     this.gatedUnlock = false,
+    this.fareBreakdown,
   });
 
   int get riderCount => coPassengers.length + 1; // +1 for the current user

@@ -25,13 +25,19 @@ import 'api/driver_api.dart';
 /// [start] and [stop] are idempotent — calling start while already
 /// running is a no-op, calling stop while already stopped is a no-op.
 class LocationPushService extends ChangeNotifier {
-  /// Tick interval. 20s is the rider app's expected freshness window for
-  /// the "your driver is 4 min away" UI without burning battery.
-  static const Duration tickInterval = Duration(seconds: 20);
+  /// Default cadence — the rider app's "driver 4 min away" view tolerates
+  /// up to 20s staleness without feeling laggy when the cab is far.
+  static const Duration normalInterval = Duration(seconds: 20);
+
+  /// Tight cadence used during an active dispatch. The rider's map
+  /// re-fetches the driver position every 5s; matching ticks at 5s on
+  /// the driver side means the rider sees ≤10s of staleness in practice.
+  static const Duration fastInterval = Duration(seconds: 5);
 
   final DriverApi _api;
 
   Timer? _ticker;
+  Duration _interval = normalInterval;
   bool _running = false;
   String? _lastError;
   DateTime? _lastSuccessAt;
@@ -39,6 +45,7 @@ class LocationPushService extends ChangeNotifier {
   LocationPushService({required DriverApi api}) : _api = api;
 
   bool get running => _running;
+  Duration get interval => _interval;
   String? get lastError => _lastError;
   DateTime? get lastSuccessAt => _lastSuccessAt;
 
@@ -58,7 +65,24 @@ class LocationPushService extends ChangeNotifier {
     // Fire one immediately so the backend sees a fresh location right
     // after the toggle. Future ticks happen on the timer.
     unawaited(_pingOnce());
-    _ticker = Timer.periodic(tickInterval, (_) => _pingOnce());
+    _ticker = Timer.periodic(_interval, (_) => _pingOnce());
+  }
+
+  /// Switch to the 5s tight cadence (active trip). Idempotent — restarts
+  /// the timer only when the cadence is actually changing. Safe to call
+  /// before [start] (it just records the intent; [start] picks it up).
+  void useFastMode() => _setInterval(fastInterval);
+
+  /// Switch back to the 20s default cadence. Idempotent.
+  void useNormalMode() => _setInterval(normalInterval);
+
+  void _setInterval(Duration next) {
+    if (_interval == next) return;
+    _interval = next;
+    if (_running) {
+      _ticker?.cancel();
+      _ticker = Timer.periodic(_interval, (_) => _pingOnce());
+    }
   }
 
   /// Stop ticking. Safe to call when already stopped.

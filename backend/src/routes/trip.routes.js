@@ -12,6 +12,9 @@ router.get('/mine/active', requireAuth, ctrl.getMyActiveTrip);
 // "tap to repeat a past trip" shortcut on the destination screen.
 router.get('/destinations/recent', requireAuth, ctrl.getRecentDestinations);
 router.get('/:id', requireAuth, ctrl.getTrip);
+// Live driver position + ETA for the rider's map. Polled every 5s from
+// the rider's RideStatusScreen while the trip is arriving / in_progress.
+router.get('/:id/driver-location', requireAuth, ctrl.getDriverLocation);
 router.post('/:id/cancel', requireAuth, ctrl.cancelTrip);
 // Rider-only mode: consume an unlock to reveal co-rider details for
 // this matched trip. No-op (returns 409) in driver-dispatch mode since

@@ -1,9 +1,15 @@
 const Driver = require('../models/Driver');
 const Unlock = require('../models/Unlock');
+const ProcessedEvent = require('../models/ProcessedEvent');
 const env = require('../config/env');
 const razorpay = require('../services/razorpayClient');
 const { HttpError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+
+// 30 days is well past Razorpay's retry window (a few hours) but short
+// enough that the dedupe index stays cheap. TTL index on ProcessedEvent
+// auto-prunes expired entries.
+const WEBHOOK_DEDUPE_TTL_DAYS = 30;
 
 // =============================================================================
 // Razorpay webhook handler
@@ -14,11 +20,11 @@ const logger = require('../utils/logger');
 // loses key ordering and breaks the HMAC). The webhook router applies
 // express.raw before this controller runs so req.body is a Buffer.
 //
-// Idempotency: every event has an `id` and Razorpay can re-fire on retries.
-// We rely on the underlying state being already-applied (subscription
-// already extended, unlock already minted) — both are no-ops if repeated.
-// For production, store processed event ids in a TTL collection and reject
-// duplicates explicitly.
+// Idempotency: Razorpay retries on any non-2xx response, and Cloud Run
+// timeouts / transient network failures cause duplicates even when we
+// processed the event successfully. We dedupe by `event.id` via the
+// ProcessedEvent collection — a unique index throws E11000 on the second
+// attempt and we short-circuit before re-applying the state change.
 // =============================================================================
 async function handleRazorpayWebhook(req, res, next) {
   try {
@@ -35,7 +41,23 @@ async function handleRazorpayWebhook(req, res, next) {
     if (!ok) throw new HttpError(401, 'Invalid webhook signature');
 
     const event = JSON.parse(rawBody.toString('utf8'));
-    logger.info(`Razorpay webhook event=${event.event} id=${event.id || event.payload?.payment?.entity?.id || 'unknown'}`);
+    const eventId = event.id || event.payload?.payment?.entity?.id;
+    logger.info(`Razorpay webhook event=${event.event} id=${eventId || 'unknown'}`);
+
+    // Dedupe BEFORE state changes. If event.id is missing (shouldn't happen
+    // with real Razorpay payloads, but webhook test fixtures sometimes omit
+    // it), fall through without recording — better to risk a double-apply
+    // than to silently swallow events we can't track.
+    if (eventId) {
+      const inserted = await tryRecordEvent({
+        eventId,
+        summary: `${event.event}:${event.payload?.payment?.entity?.id || ''}`,
+      });
+      if (!inserted) {
+        logger.info(`Webhook event ${eventId} already processed — skipping`);
+        return res.json({ received: true, deduped: true });
+      }
+    }
 
     // Razorpay's event names: payment.captured, payment.failed, order.paid, etc.
     // For v1 we care about payment.captured (covers both unlock + subscription).
@@ -49,6 +71,29 @@ async function handleRazorpayWebhook(req, res, next) {
     res.json({ received: true });
   } catch (err) {
     next(err);
+  }
+}
+
+/// Atomic "have I seen this event before?" check. Returns true if this
+/// is the first time we're recording the id; false if it's a duplicate.
+/// Any other failure (e.g. Mongo down) throws so the webhook 5xx's and
+/// Razorpay retries — better to risk a duplicate than to drop an event.
+async function tryRecordEvent({ eventId, summary }) {
+  const expiresAt = new Date(
+    Date.now() + WEBHOOK_DEDUPE_TTL_DAYS * 24 * 60 * 60 * 1000,
+  );
+  try {
+    await ProcessedEvent.create({
+      source: 'razorpay',
+      eventId,
+      summary,
+      expiresAt,
+    });
+    return true;
+  } catch (err) {
+    // E11000 = unique-index violation = already processed.
+    if (err && err.code === 11000) return false;
+    throw err;
   }
 }
 

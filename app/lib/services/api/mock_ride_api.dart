@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import '../../models/driver_live_location.dart';
 import '../../models/match_proposal.dart';
 import '../../models/payment.dart';
 import '../../models/recent_destination.dart';
@@ -196,6 +197,17 @@ class MockRideApi implements RideApi {
   }
 
   @override
+  Future<UnlockOrder> startUnlockOrder() async {
+    await Future.delayed(_latency());
+    return UnlockOrder(
+      orderId: 'mock_order_${DateTime.now().millisecondsSinceEpoch}',
+      amountPaise: 5000,
+      currency: 'INR',
+      razorpayKeyId: '', // empty = stub-mode signal, mock-app skips the sheet
+    );
+  }
+
+  @override
   Future<void> unlockMatchForTrip(String tripId) async {
     await Future.delayed(_latency());
   }
@@ -206,5 +218,26 @@ class MockRideApi implements RideApi {
     // Mock impl: drop the now-closed trip from history so the rider's
     // next session sees a clean slate. Real backend marks it completed.
     _history.removeWhere((r) => r.id == tripId);
+  }
+
+  @override
+  Future<DriverLocationResponse> getDriverLocation(String tripId) async {
+    await Future.delayed(_latency());
+    // Mock impl: jiggle around a Bangalore coord so the rider-side
+    // tracker test path renders something. ETA fixed at 4 min.
+    final jitter = (DateTime.now().millisecondsSinceEpoch % 1000) / 1000000;
+    return DriverLocationResponse(
+      driver: DriverLiveLocation(
+        lat: 12.9716 + jitter,
+        lng: 77.5946 + jitter,
+        updatedAt: DateTime.now(),
+      ),
+      eta: const TripEta(
+        toStop: 'pickup',
+        seconds: 240,
+        distanceMeters: 1800,
+        source: 'haversine',
+      ),
+    );
   }
 }

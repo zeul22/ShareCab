@@ -5,6 +5,7 @@ import '../models/payment.dart';
 import '../routes.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
+import '../widgets/fare_breakdown_card.dart';
 
 /// Each rider pays their own share. The user picks pay-now vs pay-after, and
 /// a method. Real gateway integration is mocked behind [RideApi.completePayment].
@@ -43,34 +44,42 @@ class _PaymentScreenState extends State<PaymentScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppTheme.brandLight,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Your share of this ride',
-                      style: TextStyle(
-                        color: AppTheme.brandDark,
-                        fontWeight: FontWeight.w600,
+            // Itemised breakdown when the trip carries one (post pricing
+            // rewrite); legacy fallback to the simple amount-due card.
+            if (ride.proposal.fareBreakdown != null)
+              FareBreakdownCard(
+                breakdown: ride.proposal.fareBreakdown!,
+                title: 'Amount due',
+              )
+            else
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: AppTheme.brandLight,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Your share of this ride',
+                        style: TextStyle(
+                          color: AppTheme.brandDark,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
-                  Text(
-                    '₹${ride.perRiderFare.toStringAsFixed(0)}',
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.brandDark,
+                    Text(
+                      '₹${ride.perRiderFare.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.brandDark,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
             const SizedBox(height: 18),
             const Text('When do you want to pay?',
                 style: TextStyle(fontWeight: FontWeight.w700)),

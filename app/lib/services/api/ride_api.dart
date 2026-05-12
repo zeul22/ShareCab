@@ -1,3 +1,4 @@
+import '../../models/driver_live_location.dart';
 import '../../models/match_proposal.dart';
 import '../../models/payment.dart';
 import '../../models/recent_destination.dart';
@@ -61,6 +62,14 @@ abstract class RideApi {
   /// count is enough — otherwise returns 400 with the required count.
   Future<void> recordAdRewardForUnlock({required int adsCompleted});
 
+  /// Step 1 of the Razorpay-backed unlock pay path. Backend creates an
+  /// order tagged `notes.kind=rider_unlock`. The client feeds the
+  /// returned [orderId] / [razorpayKeyId] / [amountPaise] into the
+  /// checkout sheet; on success, signature + paymentId come back via
+  /// [recordPaymentForUnlock]. When [razorpayKeyId] is empty, the
+  /// backend is in stub mode and the client should bypass the sheet.
+  Future<UnlockOrder> startUnlockOrder();
+
   /// Stub Razorpay payment path: tells the backend "rider paid X paise"
   /// and the backend mints an Unlock. In real Razorpay mode, callers
   /// pass the orderId + paymentId + signature returned by the checkout
@@ -83,4 +92,39 @@ abstract class RideApi {
   /// Sets fareFinal=0, marks completed, settles the group when the
   /// last sibling closes too. Idempotent. 409 outside rider-only mode.
   Future<void> closeRiderTrip(String tripId);
+
+  /// Live driver position + ETA to the next pending stop. Used by
+  /// [TripTrackingService] to drive the live-ride screen's driver marker
+  /// + ETA chip. Polled every 5s during `arriving` / `in_progress`.
+  /// Throws when no driver is assigned yet (404) or the driver hasn't
+  /// pushed any location since coming online.
+  Future<DriverLocationResponse> getDriverLocation(String tripId);
+}
+
+/// Razorpay order details returned by `POST /unlocks/order`. Same shape
+/// as the driver-subscription order but kept separate to avoid coupling
+/// the two surfaces.
+class UnlockOrder {
+  final String orderId;
+  final int amountPaise;
+  final String currency;
+  final String razorpayKeyId;
+
+  const UnlockOrder({
+    required this.orderId,
+    required this.amountPaise,
+    required this.currency,
+    required this.razorpayKeyId,
+  });
+
+  /// Empty keyId means the backend is in stub mode (no Razorpay creds).
+  /// Callers should skip the checkout sheet and confirm directly.
+  bool get isStub => razorpayKeyId.isEmpty;
+
+  factory UnlockOrder.fromJson(Map<String, dynamic> json) => UnlockOrder(
+        orderId: (json['orderId'] as String?) ?? '',
+        amountPaise: (json['amountPaise'] as num?)?.toInt() ?? 0,
+        currency: (json['currency'] as String?) ?? 'INR',
+        razorpayKeyId: (json['razorpayKeyId'] as String?) ?? '',
+      );
 }

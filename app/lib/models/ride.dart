@@ -1,6 +1,7 @@
 import 'driver.dart';
 import 'match_proposal.dart';
 import 'passenger.dart';
+import 'place.dart';
 
 enum RideStatus {
   confirmed, // accepted, awaiting driver pickup
@@ -34,6 +35,16 @@ class Ride {
   /// confirmation time.
   final double perRiderFare;
 
+  /// Actual GPS where the driver tapped "Picked up" — backend persists
+  /// this on the Trip and the rider's map snaps the source pin here once
+  /// the trip transitions to in_progress. Null until the pickup happens
+  /// (or always, on legacy trips that predate actual-capture).
+  final Place? actualPickup;
+
+  /// Actual GPS where the driver tapped "Dropped". Used by the
+  /// completed-ride screen + audit.
+  final Place? actualDropoff;
+
   const Ride({
     required this.id,
     required this.proposal,
@@ -45,12 +56,16 @@ class Ride {
     required this.perRiderFare,
     this.startedAt,
     this.completedAt,
+    this.actualPickup,
+    this.actualDropoff,
   });
 
   Ride copyWith({
     RideStatus? status,
     DateTime? startedAt,
     DateTime? completedAt,
+    Place? actualPickup,
+    Place? actualDropoff,
   }) =>
       Ride(
         id: id,
@@ -63,5 +78,7 @@ class Ride {
         perRiderFare: perRiderFare,
         startedAt: startedAt ?? this.startedAt,
         completedAt: completedAt ?? this.completedAt,
+        actualPickup: actualPickup ?? this.actualPickup,
+        actualDropoff: actualDropoff ?? this.actualDropoff,
       );
 }

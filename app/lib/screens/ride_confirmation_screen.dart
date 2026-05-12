@@ -6,6 +6,7 @@ import '../models/vehicle.dart';
 import '../routes.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
+import '../widgets/fare_breakdown_card.dart';
 
 /// Driver + car + OTP screen. The OTP is shown only after the user reaches
 /// this point (i.e. the ride is confirmed).
@@ -279,29 +280,36 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const _SectionTitle(title:'Your share'),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF4F6F7),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'You pay only your part of the fare. Drivers receive the full amount.',
-                      style: TextStyle(color: Colors.black54),
+            const _SectionTitle(title: 'Your share'),
+            // New itemised breakdown when the backend provided one (post-
+            // pricing-rewrite trips). Falls back to the legacy single-line
+            // display for old trips that don't carry the breakdown.
+            if (ride.proposal.fareBreakdown != null)
+              FareBreakdownCard(breakdown: ride.proposal.fareBreakdown!)
+            else
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF4F6F7),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'You pay only your part of the fare. Drivers receive the full amount.',
+                        style: TextStyle(color: Colors.black54),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    '₹${ride.perRiderFare.toStringAsFixed(0)}',
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    Text(
+                      '₹${ride.perRiderFare.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                          fontSize: 22, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),

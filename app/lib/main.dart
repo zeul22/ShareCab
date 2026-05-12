@@ -14,6 +14,7 @@ import 'services/auth_service.dart';
 import 'services/location_service.dart';
 import 'services/notification_service.dart';
 import 'services/ride_flow.dart';
+import 'services/trip_tracking_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/api_config.dart';
 import 'widgets/ride_flow_banner.dart';
@@ -133,6 +134,10 @@ class ShareCabApp extends StatelessWidget {
         ChangeNotifierProvider<AuthService>.value(value: authService),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => RideFlowState(rideApi)),
+        // Live-trip tracker: polls /trips/:id/driver-location while the
+        // rider is on the RideStatusScreen. Cheap to keep around even
+        // when idle — no timer runs until start() is called.
+        ChangeNotifierProvider(create: (_) => TripTrackingService(rideApi)),
       ],
       child: MaterialApp(
         title: 'ShareCab',
