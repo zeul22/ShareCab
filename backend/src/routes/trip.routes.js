@@ -23,6 +23,10 @@ router.post('/:id/unlock-match', requireAuth, ctrl.unlockMatch);
 // Rider-only mode: rider self-closes a matched trip after they've
 // coordinated their own cab off-platform. 409 in driver-dispatch mode.
 router.post('/:id/rider-close', requireAuth, ctrl.riderCloseTrip);
+// Rider-initiated "stop here" while in_progress. Charges the full
+// pre-quoted fare (no proration). Distinct from /cancel (pre-pickup,
+// no charge) and /rider-close (rider-only mode, no driver, fare=0).
+router.post('/:id/end-early', requireAuth, ctrl.endRideEarly);
 router.get('/groups/:id/fare', requireAuth, ctrl.getGroupFare);
 
 // Driver-only lifecycle transitions.

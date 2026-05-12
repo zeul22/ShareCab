@@ -17,6 +17,15 @@ The rider picks; we don't gate which is "preferred." Both lead to an `Unlock` do
 
 Without a TTL, a rider could unlock once and book ten trips. The TTL ties one unlock to one match search journey — long enough to complete the flow (pick locations → ads/payment → wait → confirm), short enough that hoarding doesn't work.
 
+### Where the ad / payment sheet surfaces
+
+| Mode | When the rider sees `MatchUnlockSheet` |
+|---|---|
+| **Driver-dispatch** (`MATCH_RIDER_ONLY=false`) | At trip-request time. The rider hits "Find a ride"; if there's no active `Unlock` doc, the backend returns 402 from `/trips`. The rider app catches this via `UnlockRequiredException` ([http_ride_api.dart](../app/lib/services/api/http_ride_api.dart)), opens the sheet, mints the unlock on success, and retries the trip request automatically. |
+| **Rider-only** (`MATCH_RIDER_ONLY=true`) | At match-reveal time. The trip gets created free; once a co-rider matches, the rider has to unlock to see who matched and coordinate. Triggered from [match_result_screen.dart](../app/lib/screens/match_result_screen.dart). |
+
+Same sheet, same two paths (ads OR Razorpay), different trigger point. The sheet supports both modes via a nullable `tripId` parameter — `null` means pre-trip mint (the freshly minted Unlock gets consumed by the next `/trips` call's `findOneAndUpdate`); non-null means consume against a specific matched trip.
+
 ### Rider-only mode shift
 
 In `MATCH_RIDER_ONLY=true` mode, the unlock moves from **request time** to **match-reveal time**. Riders only commit (pay or watch ads) after seeing they were actually matched. This addresses the "dead money" problem during the early phase when match rates were low.

@@ -10,6 +10,7 @@ import '../services/auth_service.dart';
 import '../services/location_push_service.dart';
 import '../services/subscription_checkout.dart';
 import '../theme/app_theme.dart';
+import '../widgets/incoming_offer_sheet.dart';
 
 /// Driver-mode landing screen. Polls `/drivers/me` every 12s while the
 /// driver is online + unassigned so a fresh dispatch surfaces without a
@@ -26,7 +27,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  static const _pollInterval = Duration(seconds: 12);
+  // Two cadences. Fast cadence (3s) runs while online + unassigned so
+  // an incoming offer surfaces within a few seconds of the rider booking.
+  // Slow cadence (12s) is the steady-state when offline OR mid-trip — we
+  // only need to detect macro changes (subscription expiry, manual
+  // server-side flips).
+  static const _slowPollInterval = Duration(seconds: 12);
+  static const _fastPollInterval = Duration(seconds: 3);
 
   DriverProfile? _profile;
   bool _loading = true;
@@ -35,6 +42,11 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   SubscriptionCheckout? _checkout;
   Timer? _poll;
+  Duration _currentInterval = _slowPollInterval;
+  // True while the IncomingOfferSheet is mounted, so the poll doesn't
+  // stack a second sheet on a second poll tick while the driver is
+  // already deciding on the first offer.
+  bool _offerSheetOpen = false;
 
   DriverApi get _api => context.read<DriverApi>();
   LocationPushService get _locationPush => context.read<LocationPushService>();
@@ -42,9 +54,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[home] initState');
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      debugPrint('[home] postFrame — _refresh + start poll');
       _refresh();
-      _poll = Timer.periodic(_pollInterval, (_) => _refresh(silent: true));
+      _startPoll(_slowPollInterval);
     });
   }
 
@@ -55,7 +69,18 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  /// (Re-)arm the periodic refresh at the given cadence. Cancels any
+  /// existing timer first so cadence switches are atomic.
+  void _startPoll(Duration interval) {
+    if (_currentInterval == interval && _poll != null && _poll!.isActive) return;
+    _poll?.cancel();
+    _currentInterval = interval;
+    _poll = Timer.periodic(interval, (_) => _refresh(silent: true));
+    debugPrint('[home] poll cadence → ${interval.inSeconds}s');
+  }
+
   Future<void> _refresh({bool silent = false}) async {
+    debugPrint('[home] _refresh(silent=$silent)');
     if (!mounted) return;
     if (!silent) {
       setState(() {
@@ -65,6 +90,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     try {
       final p = await _api.getMyDriver();
+      debugPrint('[home] getMyDriver ok — online=${p.isOnline} '
+          'activeTrips=${p.activeTripIds.length} '
+          'verification=${p.verificationStatus}');
       if (!mounted) return;
       setState(() {
         _profile = p;
@@ -74,16 +102,33 @@ class _HomeScreenState extends State<HomeScreen> {
       // stop them, or if the user came back to the app after the timer
       // was paused. Idempotent — no-op when already running.
       if (p.isOnline && !_locationPush.running) {
+        debugPrint('[home] resuming location push (was online)');
         unawaited(_locationPush.start());
       } else if (!p.isOnline && _locationPush.running) {
+        debugPrint('[home] stopping location push (now offline)');
         _locationPush.stop();
       }
+      // Adaptive cadence: 3s while looking for an offer, 12s otherwise.
+      // The fast cadence keeps perceived latency low when a rider books;
+      // the slow cadence saves battery + backend load the rest of the time.
+      final wantFast = p.isOnline && !p.hasActiveDispatch;
+      _startPoll(wantFast ? _fastPollInterval : _slowPollInterval);
+
       // Auto-jump into an active trip if one came in while we were on
       // home. Pushed (not replaced) so back lands on home.
       if (p.hasActiveDispatch && ModalRoute.of(context)?.isCurrent == true) {
+        debugPrint('[home] auto-pushing → activeTrip '
+            '(${p.activeTripIds.length} trips)');
         Navigator.of(context).pushNamed(Routes.activeTrip);
+      } else if (wantFast && !_offerSheetOpen) {
+        // Check for a pending offer alongside the profile. The /me/offer
+        // endpoint is cheap (one indexed Mongo lookup, 204 in the common
+        // case) and only fires the sheet when there's actually something
+        // to act on. Sheet-open guard prevents stacking on rapid ticks.
+        await _checkForPendingOffer();
       }
     } catch (e) {
+      debugPrint('[home] _refresh threw: $e');
       if (!mounted) return;
       setState(() {
         _loading = false;
@@ -91,6 +136,56 @@ class _HomeScreenState extends State<HomeScreen> {
           _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
         }
       });
+    }
+  }
+
+  /// Hits `GET /drivers/me/offer`. If the response carries a pending
+  /// offer, shows the [IncomingOfferSheet] and dispatches the result to
+  /// the backend. Sheet-open guard via [_offerSheetOpen] keeps the next
+  /// poll tick from stacking a second sheet on the same offer.
+  Future<void> _checkForPendingOffer() async {
+    if (_offerSheetOpen) return;
+    final offer = await _api.getMyOffer();
+    if (offer == null || !mounted) return;
+
+    debugPrint('[home] incoming offer trip=${offer.tripId} '
+        'expiresIn=${offer.secondsRemaining()}s');
+    _offerSheetOpen = true;
+    try {
+      final result = await IncomingOfferSheet.show(context, offer);
+      if (!mounted) return;
+      switch (result) {
+        case OfferAccepted():
+          debugPrint('[home] driver tapped ACCEPT — calling backend');
+          try {
+            await _api.acceptOffer(offer.tripId);
+          } catch (e) {
+            // Backend can 409 if the offer already expired between the
+            // sheet showing and the tap landing. Treat as expired —
+            // next poll picks up whatever comes next.
+            debugPrint('[home] acceptOffer threw: $e');
+            if (mounted) {
+              setState(() => _error =
+                  'Offer no longer available. Waiting for the next one.');
+            }
+          }
+          // Next /drivers/me poll surfaces hasActiveDispatch=true →
+          // existing code path auto-pushes to ActiveTripScreen.
+          unawaited(_refresh(silent: true));
+        case OfferRejected():
+          debugPrint('[home] driver tapped REJECT — calling backend');
+          try {
+            await _api.rejectOffer(offer.tripId);
+          } catch (e) {
+            debugPrint('[home] rejectOffer threw: $e');
+          }
+        case OfferExpired():
+          // Backend's own timer already auto-rejected on the wire. No
+          // need to call /reject — would just 409 ("not_offered").
+          debugPrint('[home] offer expired locally');
+      }
+    } finally {
+      if (mounted) _offerSheetOpen = false;
     }
   }
 

@@ -192,6 +192,21 @@ const env = {
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || '',
   },
 
+  // =============================================================================
+  // Driver dispatch (the Uber-style offer flow)
+  // =============================================================================
+  dispatch: {
+    // How long a driver has to accept/reject an offered trip before we
+    // auto-reject and re-dispatch. 15s mirrors Uber/Ola — short enough
+    // that an absent driver doesn't strand the rider, long enough for
+    // a driver who's looking at the phone to tap a button.
+    offerTimeoutMs: num(process.env.DISPATCH_OFFER_TIMEOUT_MS, 15_000),
+    // Max distance (metres) the matching engine looks when finding a
+    // driver. Mirrors what `findNearestAvailableDriver` historically
+    // hardcoded; lifted to env so we can tune per market.
+    radiusMeters: num(process.env.DISPATCH_RADIUS_METERS, 5000),
+  },
+
   driverSub: {
     // Monthly driver subscription. Drivers without an active sub are
     // blocked at /api/drivers/online. Pricing TBD — ₹199/month is roughly

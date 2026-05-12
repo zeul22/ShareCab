@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
@@ -21,19 +24,59 @@ import 'theme/app_theme.dart';
 import 'utils/api_config.dart';
 
 Future<void> main() async {
+  // Wrap the whole boot in runZonedGuarded so any uncaught async error
+  // (DNS failure, plugin init crash, provider exception, etc.) lands in
+  // our logger instead of silently disconnecting the device.
+  await runZonedGuarded(_bootstrap, (err, stack) {
+    debugPrint('═══ FATAL (uncaught async) ═══');
+    debugPrint('$err');
+    debugPrint('$stack');
+  });
+}
+
+Future<void> _bootstrap() async {
+  debugPrint('[boot] 1/5 ensureInitialized()');
   WidgetsFlutterBinding.ensureInitialized();
-  // Pulls MSG91 widget creds from the backend if --dart-defines aren't set.
-  // Falls back silently when the backend isn't reachable — auth then runs
-  // through HttpAuthApi's dev-OTP path.
-  await ApiConfig.loadRuntimeMsg91Config();
+
+  // Surface Flutter framework errors verbatim. Default behaviour in
+  // debug is "red screen of error"; that doesn't show in the terminal,
+  // so a layout / build exception elsewhere can look like a silent
+  // disconnect. This forwards the full stack to stdout.
+  FlutterError.onError = (FlutterErrorDetails details) {
+    debugPrint('═══ FlutterError ═══');
+    debugPrint(details.exceptionAsString());
+    debugPrint('${details.stack}');
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint('═══ PlatformDispatcher.onError ═══');
+    debugPrint('$error');
+    debugPrint('$stack');
+    return true;
+  };
+
+  debugPrint('[boot] 2/5 loadRuntimeMsg91Config()');
+  try {
+    await ApiConfig.loadRuntimeMsg91Config();
+  } catch (e, s) {
+    debugPrint('[boot] MSG91 config load failed: $e\n$s');
+  }
+
+  debugPrint('[boot] 3/5 OTPWidget init (msg91Enabled=${ApiConfig.msg91Enabled})');
   if (ApiConfig.msg91Enabled) {
-    OTPWidget.initializeWidget(
-      ApiConfig.msg91WidgetId,
-      ApiConfig.msg91TokenAuth,
-    );
+    try {
+      OTPWidget.initializeWidget(
+        ApiConfig.msg91WidgetId,
+        ApiConfig.msg91TokenAuth,
+      );
+    } catch (e, s) {
+      debugPrint('[boot] OTPWidget.initializeWidget threw: $e\n$s');
+    }
   }
   debugPrint('[auth] ${ApiConfig.msg91DiagnosticSummary}');
+
+  debugPrint('[boot] 4/5 runApp()');
   runApp(const ShareCabDriverApp());
+  debugPrint('[boot] 5/5 runApp returned (UI engine running)');
 }
 
 class ShareCabDriverApp extends StatelessWidget {
@@ -41,17 +84,20 @@ class ShareCabDriverApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('[boot] ShareCabDriverApp.build — constructing providers');
     // Auth API is MSG91-backed when creds are configured; otherwise the
     // backend's dev-OTP fallback kicks in. AuthService persists the session
     // and powers token refresh for DriverApi.
     final AuthApi authApi =
         ApiConfig.msg91Enabled ? Msg91AuthApi() : HttpAuthApi();
+    debugPrint('[boot]   authApi = ${authApi.runtimeType}');
     final authService = AuthService(authApi);
     final driverApi = DriverApi(tokenGetter: authService.accessTokenForApi);
     // Location push uses the same DriverApi instance so it shares the auth
     // header logic and underlying http.Client. One singleton for the whole
     // app lifetime — start/stop is controlled by the online toggle.
     final locationPush = LocationPushService(api: driverApi);
+    debugPrint('[boot]   providers ready — wiring MaterialApp');
 
     return MultiProvider(
       providers: [

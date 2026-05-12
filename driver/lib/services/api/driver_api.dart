@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../models/driver_dispatch.dart';
 import '../../models/driver_profile.dart';
+import '../../models/trip_offer.dart';
 import '../../utils/api_config.dart';
 
 typedef AsyncTokenGetter = Future<String?> Function();
@@ -127,6 +128,35 @@ class DriverApi {
   /// matching engine's 2dsphere query both have fresh coordinates.
   Future<void> updateLocation({required double lat, required double lng}) async {
     await _post('/drivers/location', {'lat': lat, 'lng': lng});
+  }
+
+  // ---------------------------------------------------------------------------
+  // Driver offer flow (Uber-style accept/reject)
+  // ---------------------------------------------------------------------------
+
+  /// Current pending offer for this driver, or null when nothing is on
+  /// the wire. Polled at 3s cadence from the home screen while online
+  /// + unassigned. 204 from the backend → null here.
+  Future<TripOffer?> getMyOffer() async {
+    final res = await _get('/drivers/me/offer');
+    if (res.statusCode == 204 || res.body.isEmpty) return null;
+    final body = _decode(res);
+    final raw = body['offer'];
+    if (raw is! Map<String, dynamic>) return null;
+    return TripOffer.fromTripJson(raw);
+  }
+
+  /// Accept the offered trip. Backend transitions status → driver_assigned
+  /// and populates Driver.activeTrips, which the next /drivers/me poll
+  /// surfaces — and from there the home screen auto-pushes to ActiveTripScreen.
+  Future<void> acceptOffer(String tripId) async {
+    await _post('/drivers/offers/$tripId/accept', const {});
+  }
+
+  /// Reject the offered trip. Backend pushes this driver into
+  /// `Trip.rejectedBy` and re-dispatches to the next-nearest driver.
+  Future<void> rejectOffer(String tripId) async {
+    await _post('/drivers/offers/$tripId/reject', const {});
   }
 
   // ---------------------------------------------------------------------------

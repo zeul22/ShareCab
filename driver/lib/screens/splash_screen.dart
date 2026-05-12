@@ -25,25 +25,34 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('[splash] initState — scheduling _bootstrap');
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
-    final auth = context.read<AuthService>();
-    await auth.bootstrap();
-    if (!mounted) return;
-
-    if (!auth.isAuthenticated) {
-      Navigator.of(context).pushReplacementNamed(Routes.phoneEntry);
-      return;
-    }
-
-    // Authed — figure out where the user belongs based on driver status.
-    final driverApi = context.read<DriverApi>();
     try {
+      debugPrint('[splash] auth.bootstrap()');
+      final auth = context.read<AuthService>();
+      await auth.bootstrap();
+      if (!mounted) return;
+      debugPrint('[splash]   authed=${auth.isAuthenticated} role=${auth.user?.role}');
+
+      if (!auth.isAuthenticated) {
+        debugPrint('[splash] → phone entry');
+        Navigator.of(context).pushReplacementNamed(Routes.phoneEntry);
+        return;
+      }
+
+      // Authed — figure out where the user belongs based on driver status.
+      debugPrint('[splash] driverApi.getMyDriverOrNull()');
+      final driverApi = context.read<DriverApi>();
       final profile = await driverApi.getMyDriverOrNull();
       if (!mounted) return;
+      debugPrint('[splash]   driver doc=${profile != null} '
+          'status=${profile?.verificationStatus}');
+
       if (profile == null) {
+        debugPrint('[splash] → onboarding');
         Navigator.of(context).pushReplacementNamed(Routes.onboarding);
         return;
       }
@@ -52,6 +61,7 @@ class _SplashScreenState extends State<SplashScreen> {
       // build that didn't refresh), mint a fresh token so the
       // requireRole('driver') gates on /online + /offline don't 403.
       if (auth.user?.role != 'driver') {
+        debugPrint('[splash] role mismatch — auth.forceRefresh()');
         await auth.forceRefresh();
         if (!mounted) return;
       }
@@ -62,15 +72,22 @@ class _SplashScreenState extends State<SplashScreen> {
         // belt-and-suspenders, but starting here avoids the ~12s window
         // before the first poll completes.
         if (profile.isOnline) {
+          debugPrint('[splash] resuming location push (driver was online)');
           unawaited(context.read<LocationPushService>().start());
         }
+        debugPrint('[splash] → home');
         Navigator.of(context).pushReplacementNamed(Routes.home);
       } else {
+        debugPrint('[splash] → pending review');
         Navigator.of(context).pushReplacementNamed(Routes.pendingReview);
       }
-    } catch (_) {
+    } catch (e, s) {
       // Network blip on first launch — drop to onboarding rather than
       // strand the user on the splash. They can retry from there.
+      // Logging the stack so we can tell apart "no driver doc" vs
+      // "Mongo down" vs "JWT malformed" without re-instrumenting later.
+      debugPrint('[splash] bootstrap threw: $e');
+      debugPrint('$s');
       if (mounted) {
         Navigator.of(context).pushReplacementNamed(Routes.onboarding);
       }

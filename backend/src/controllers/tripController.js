@@ -145,26 +145,17 @@ async function requestTrip(req, res, next) {
       );
     }
 
-    // Gate: shareEnabled trips need an unconsumed unlock (earned by
-    // watching ads or via Razorpay payment). In driver-dispatch mode
-    // the unlock is consumed up front (here). In rider-only mode the
-    // gate moves to POST /trips/:id/unlock-match — trip creation is
-    // free so the rider sees whether a match exists before paying.
-    let unlock = null;
-    if (data.shareEnabled && !env.match.riderOnly) {
-      const now = new Date();
-      unlock = await Unlock.findOneAndUpdate(
-        { rider: req.auth.userId, usedAt: null, expiresAt: { $gt: now } },
-        { $set: { usedAt: now } },
-        { sort: { expiresAt: 1 } },
-      );
-      if (!unlock) {
-        throw new HttpError(
-          402,
-          'Matching gate not unlocked: complete 2 rewarded ads or pay to unlock',
-        );
-      }
-    }
+    // No upfront unlock gate. Trip creation is always free — the rider
+    // only pays (ads OR Razorpay) AFTER a co-rider match is confirmed
+    // (see `unlockMatch`). The earlier "pay upfront" model was hostile
+    // UX: it charged riders for a search that might never find a
+    // co-rider, which is the textbook dead-money problem.
+    //
+    // Solo trips (shareEnabled=false): no unlock ever — there's no
+    // sharing benefit to pay for.
+    // Solo fallback after a shared search times out without a co-rider:
+    // also no unlock — the rider didn't get the benefit they were
+    // searching for.
 
     const trip = await Trip.create({
       rider: req.auth.userId,
@@ -178,11 +169,6 @@ async function requestTrip(req, res, next) {
         location: { type: 'Point', coordinates: [data.dropoff.lng, data.dropoff.lat] },
       },
     });
-
-    // Tag the unlock with the trip it paid for, for audit/refund flows later.
-    if (unlock) {
-      await Unlock.updateOne({ _id: unlock._id }, { $set: { usedForTrip: trip._id } });
-    }
 
     // Fare estimate stored upfront for the rider's reference. Pre-
     // dispatch we don't know the assigned driver's vehicle class — quote
@@ -217,11 +203,17 @@ async function requestTrip(req, res, next) {
     if (data.shareEnabled) {
       const group = await findMatchForTrip(trip._id);
       if (group) {
-        // In driver-dispatch mode, ALL group trips get a driver assigned
-        // here. In rider-only mode we stop after pairing — riders see
-        // "Match found" on their match screen and coordinate their own
-        // cab via chat once they unlock the match.
-        if (!env.match.riderOnly) await assignDriverForGroup(group);
+        // Deferred dispatch in BOTH modes now. Previously driver-dispatch
+        // immediately offered the trip to a driver here — but with the
+        // upfront unlock removed, we'd be committing a driver's time
+        // before the rider has paid for the sharing benefit. Instead:
+        // status='matched', rider sees the match-result screen, taps
+        // unlock, and `unlockMatch` triggers `offerGroupToDriver`. In
+        // rider-only mode there's no dispatch step at all — same as
+        // before.
+        //
+        // No-op: the matching service already set status='matched' on
+        // every member trip when the group was formed.
       } else {
         scheduleDeferredDispatch(trip._id);
       }
@@ -312,12 +304,19 @@ async function getTrip(req, res, next) {
     // The match group itself stays visible (so the client knows a match
     // exists), but co-rider names, ratings, pickups and drops are
     // stripped. Admin / driver fetches always see the full doc.
+    // Redact co-rider details until the rider unlocks the match. Fires
+    // in BOTH modes now (driver-dispatch was previously auto-revealed
+    // because the unlock was consumed at request time). The rider's
+    // MatchUnlockSheet uses the redaction signal (`gatedUnlock` flag on
+    // the proposal) to decide when to show ads/pay.
     const redact =
-      env.match.riderOnly &&
       req.auth.role !== 'admin' &&
       req.auth.role !== 'driver' &&
       trip.rider.toString() === req.auth.userId &&
-      !trip.matchRevealedAt;
+      !trip.matchRevealedAt &&
+      // Only meaningful once siblings exist — bare requested/solo trips
+      // have nothing to redact.
+      Boolean(trip.matchGroup);
     if (redact) {
       const obj = trip.toObject();
       if (obj.matchGroup && Array.isArray(obj.matchGroup.trips)) {
@@ -409,11 +408,96 @@ async function riderCloseTrip(req, res, next) {
   }
 }
 
-// Rider-only mode: consume an unlock to reveal co-rider details for
-// this trip's matched group. Idempotent — once matchRevealedAt is set,
-// subsequent calls return the populated trip without consuming another
-// unlock. Returns 402 when the rider has no usable unlock, 409 when
-// there's no match to unlock against yet.
+// =============================================================================
+// Rider-initiated early end — driver-dispatch mode.
+//
+// "Stop the ride here" while in_progress. The rider drops out at the
+// current location; the platform charges the FULL pre-quoted fare (no
+// proration). Justification for the no-refund rule:
+//   - The driver is already committed and was on the planned route.
+//   - The fare was quoted up-front so the rider knew the cost; ending
+//     early is the rider's convenience, not the driver's fault.
+//   - Mid-trip proration invites abuse ("end at 90% to save 10%").
+//
+// For shared trips: only this rider's slice ends. Siblings stay in_progress
+// and the driver continues to their drops. Pulled from Driver.activeTrips
+// so the driver's UI surfaces "one rider dropped off, n-1 remaining."
+// =============================================================================
+async function endRideEarly(req, res, next) {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) throw new HttpError(404, 'Trip not found');
+    if (trip.rider.toString() !== req.auth.userId) {
+      throw new HttpError(403, 'Not your trip');
+    }
+    // Idempotent: a previously-ended trip returns its existing state.
+    if (trip.status === 'completed' || trip.status === 'cancelled') {
+      return res.json({ trip, alreadyEnded: true });
+    }
+    // Only sensible for trips that have actually started. Pre-pickup
+    // → /trips/:id/cancel (no charge). Anything else is a programmer
+    // error; reject with 409 so the bug surfaces in the client.
+    if (trip.status !== 'in_progress') {
+      throw new HttpError(
+        409,
+        `Cannot end-early from status ${trip.status}. ` +
+          'Use /cancel before pickup; /end-early only applies to in_progress.',
+      );
+    }
+
+    const now = new Date();
+    trip.status = 'completed';
+    trip.completedAt = now;
+    // FULL pre-quoted fare. fareEstimate is already in paise from the
+    // pricing rewrite + already accounts for the rider's allocation in
+    // shared trips (the share was set when the match formed).
+    trip.fareFinal = trip.fareEstimate;
+    await trip.save();
+
+    // Pull THIS trip from the driver's activeTrips. Siblings stay so
+    // the driver's UI keeps showing the remaining riders.
+    if (trip.driver) {
+      await Driver.updateOne(
+        { _id: trip.driver },
+        { $pull: { activeTrips: trip._id } },
+      );
+    }
+
+    // Bump totalRides — the rider did complete a ride, just shorter.
+    await User.updateOne({ _id: trip.rider }, { $inc: { totalRides: 1 } });
+
+    // Group bookkeeping: when every sibling completes, the group is done.
+    if (trip.matchGroup) {
+      const group = await MatchGroup.findById(trip.matchGroup).populate('trips');
+      const allDone = group.trips.every((t) => t.status === 'completed');
+      if (allDone) {
+        group.status = 'completed';
+        await group.save();
+      }
+    }
+
+    logger.info(
+      `[trip] early-end rider=${trip.rider} driver=${trip.driver || 'n/a'} ` +
+      `trip=${trip._id} fareFinal=${trip.fareFinal} paise`,
+    );
+
+    await broadcastTripUpdate(trip);
+    res.json({ trip });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Consume an unlock to confirm a shared match. Fires in BOTH modes:
+//   - rider-only: reveals redacted co-rider details on the match screen.
+//   - driver-dispatch: reveals co-rider details AND triggers the driver
+//     dispatch that was deferred at trip-request time. Without this,
+//     drivers would get offered trips before the rider has paid for
+//     the sharing benefit.
+//
+// Idempotent: once matchRevealedAt is set, repeat calls return the
+// populated trip without consuming another unlock. Returns 402 when the
+// rider has no usable unlock, 409 when there's no match to unlock yet.
 async function unlockMatch(req, res, next) {
   try {
     const trip = await Trip.findById(req.params.id);
@@ -445,6 +529,23 @@ async function unlockMatch(req, res, next) {
 
     trip.matchRevealedAt = now;
     await trip.save();
+
+    // Driver-dispatch mode: this is the moment the rider has committed
+    // (unlock consumed). Hand the group off to the dispatch service so
+    // a driver gets offered the trip. Failure here is non-fatal — the
+    // group stays in 'matched' and the deferred-dispatch fallback /
+    // matching engine retry will pick it up.
+    if (!env.match.riderOnly) {
+      try {
+        const group = await MatchGroup.findById(trip.matchGroup);
+        if (group && !group.driver) {
+          const dispatchService = require('../services/dispatchService');
+          await dispatchService.offerGroupToDriver(group);
+        }
+      } catch (e) {
+        logger.warn(`[unlock-match] post-unlock dispatch failed: ${e.message}`);
+      }
+    }
 
     const populated = await Trip.findById(trip._id).populate(TRIP_POPULATE);
     res.json({ trip: populated });
@@ -951,6 +1052,7 @@ module.exports = {
   getTrip,
   unlockMatch,
   riderCloseTrip,
+  endRideEarly,
   listMyTrips,
   getRecentDestinations,
   getMyActiveTrip,

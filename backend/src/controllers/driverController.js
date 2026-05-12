@@ -6,6 +6,7 @@ const env = require('../config/env');
 const { HttpError } = require('../middleware/errorHandler');
 const { isWithinIndia } = require('../utils/geo');
 const razorpay = require('../services/razorpayClient');
+const dispatchService = require('../services/dispatchService');
 const logger = require('../utils/logger');
 
 const locationSchema = z
@@ -366,6 +367,96 @@ async function onboardDriver(req, res, next) {
   }
 }
 
+// =============================================================================
+// Driver offer endpoints — the Uber-style accept/reject layer.
+//
+// Replaces the V1 auto-assignment flow. Now the matching engine OFFERS a
+// trip to the nearest driver (status='offered'); the driver app polls
+// `GET /drivers/me/offer` at 3s cadence, surfaces a sheet with countdown,
+// and POSTs to /offers/:id/accept | /reject. Backend timeout fires
+// auto-reject after env.dispatch.offerTimeoutMs so a missing driver
+// doesn't strand a rider. See services/dispatchService.js.
+// =============================================================================
+
+// One-shot snapshot for the driver-home screen's poll. Returns 204 when
+// no offer is pending (cheap signal for the client to keep waiting).
+async function getMyOffer(req, res, next) {
+  try {
+    const driver = await Driver.findOne({ user: req.auth.userId }, { _id: 1 });
+    if (!driver) throw new HttpError(404, 'Driver profile not found');
+
+    // Match by offeredTo + status='offered' AND not yet expired. Pulling
+    // ONE trip is enough — for a group offer all siblings carry the same
+    // offeredTo, and the sheet surfaces the group via the trip's
+    // populated matchGroup.
+    const trip = await Trip.findOne({
+      offeredTo: driver._id,
+      status: 'offered',
+      offerExpiresAt: { $gt: new Date() },
+    }).populate([
+      { path: 'rider', select: 'name rating phone' },
+      {
+        path: 'matchGroup',
+        populate: {
+          path: 'trips',
+          select: 'rider pickup dropoff fareEstimate fareBreakdown',
+          populate: { path: 'rider', select: 'name rating' },
+        },
+      },
+    ]);
+
+    if (!trip) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(204).end();
+    }
+
+    res.set('Cache-Control', 'no-store');
+    res.json({ offer: trip });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function acceptOffer(req, res, next) {
+  try {
+    const driver = await Driver.findOne({ user: req.auth.userId }, { _id: 1 });
+    if (!driver) throw new HttpError(404, 'Driver profile not found');
+
+    const result = await dispatchService.acceptOffer(req.params.tripId, driver._id);
+    if (!result.ok) {
+      const codes = {
+        trip_not_found: 404,
+        not_offered: 409,
+        not_your_offer: 403,
+      };
+      throw new HttpError(
+        codes[result.reason] || 409,
+        `Cannot accept offer (${result.reason})`,
+      );
+    }
+    logger.info(`[dispatch] driver=${driver._id} accepted trips=${result.tripIds.length}`);
+    res.json({ ok: true, tripIds: result.tripIds });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function rejectOffer(req, res, next) {
+  try {
+    const driver = await Driver.findOne({ user: req.auth.userId }, { _id: 1 });
+    if (!driver) throw new HttpError(404, 'Driver profile not found');
+
+    await dispatchService.rejectOffer(req.params.tripId, driver._id, {
+      reason: 'driver_rejected',
+    });
+    // 204 — backend handles re-dispatch async; client just needs to
+    // know the offer is gone from its perspective.
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   setOnline,
   setOffline,
@@ -376,4 +467,7 @@ module.exports = {
   startSubscriptionOrder,
   confirmSubscription,
   onboardDriver,
+  getMyOffer,
+  acceptOffer,
+  rejectOffer,
 };

@@ -221,6 +221,14 @@ class MockRideApi implements RideApi {
   }
 
   @override
+  Future<void> endRideEarly(String tripId) async {
+    await Future.delayed(_latency());
+    // Mock impl: same shape as closeRiderTrip — the real backend marks
+    // completed + charges fareFinal=fareEstimate. The mock just drops it.
+    _history.removeWhere((r) => r.id == tripId);
+  }
+
+  @override
   Future<DriverLocationResponse> getDriverLocation(String tripId) async {
     await Future.delayed(_latency());
     // Mock impl: jiggle around a Bangalore coord so the rider-side
