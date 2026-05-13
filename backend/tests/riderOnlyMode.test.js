@@ -334,6 +334,23 @@ describe('riderCloseTrip — self-completion in rider-only mode', () => {
     expect(after.completedAt).toBeInstanceOf(Date);
   });
 
+  test('sets startedAt so the rating gate fires', async () => {
+    // Regression: rider-only closes used to leave startedAt null,
+    // which silently filtered the trip out of the co-rider rating
+    // pending list (the gate is `startedAt != null` — meant to
+    // exclude pre-pickup self-closes in driver-dispatch mode).
+    // Now riderCloseTrip stamps startedAt at close time when nothing
+    // else set it, so the rating prompt actually appears.
+    const { a, tripA } = await setupMatchedPair();
+    expect(tripA.startedAt).toBeFalsy();
+    await call(tripCtrl.riderCloseTrip, {
+      auth: { userId: a._id.toString(), role: 'rider' },
+      params: { id: tripA._id.toString() },
+    });
+    const after = await Trip.findById(tripA._id);
+    expect(after.startedAt).toBeInstanceOf(Date);
+  });
+
   test('idempotent: closing a closed trip returns alreadyClosed', async () => {
     const { a, tripA } = await setupMatchedPair();
     await call(tripCtrl.riderCloseTrip, {

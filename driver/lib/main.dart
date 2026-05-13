@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 
@@ -22,6 +23,7 @@ import 'services/auth_service.dart';
 import 'services/location_push_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/api_config.dart';
+import 'utils/locale_policy.dart';
 
 Future<void> main() async {
   // Wrap the whole boot in runZonedGuarded so any uncaught async error
@@ -61,7 +63,8 @@ Future<void> _bootstrap() async {
     debugPrint('[boot] MSG91 config load failed: $e\n$s');
   }
 
-  debugPrint('[boot] 3/5 OTPWidget init (msg91Enabled=${ApiConfig.msg91Enabled})');
+  debugPrint(
+      '[boot] 3/5 OTPWidget init (msg91Enabled=${ApiConfig.msg91Enabled})');
   if (ApiConfig.msg91Enabled) {
     try {
       OTPWidget.initializeWidget(
@@ -110,6 +113,13 @@ class ShareCabDriverApp extends StatelessWidget {
         title: 'ShareCab Driver',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
+        supportedLocales: ShareCabLocalePolicy.supportedLocales,
+        localeResolutionCallback: ShareCabLocalePolicy.resolve,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
         initialRoute: Routes.splash,
         routes: {
           Routes.splash: (_) => const SplashScreen(),

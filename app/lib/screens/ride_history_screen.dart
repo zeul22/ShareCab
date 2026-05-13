@@ -19,7 +19,13 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
   @override
   void initState() {
     super.initState();
-    _future = context.read<RideFlowState>().loadHistory();
+    _load();
+  }
+
+  void _load() {
+    setState(() {
+      _future = context.read<RideFlowState>().loadHistory();
+    });
   }
 
   @override
@@ -29,20 +35,75 @@ class _RideHistoryScreenState extends State<RideHistoryScreen> {
       body: FutureBuilder<List<Ride>>(
         future: _future,
         builder: (_, snap) {
-          if (!snap.hasData) {
+          // Loading: connection still active and no data yet. Distinct
+          // from done-with-error, which has to render a retry surface
+          // instead of an infinite spinner (previous bug: any throw in
+          // loadHistory left the screen pinned on the spinner forever
+          // because the builder only checked hasData).
+          if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          final rides = snap.data!;
+          if (snap.hasError) {
+            return _ErrorState(
+              message: snap.error.toString().replaceFirst(
+                RegExp(r'^Exception:\s*'),
+                '',
+              ),
+              onRetry: _load,
+            );
+          }
+          final rides = snap.data ?? const <Ride>[];
           if (rides.isEmpty) {
             return const _Empty();
           }
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: rides.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _RideTile(ride: rides[i]),
+          return RefreshIndicator(
+            onRefresh: () async => _load(),
+            child: ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: rides.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) => _RideTile(ride: rides[i]),
+            ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorState({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.black38),
+            const SizedBox(height: 12),
+            const Text(
+              "Couldn't load history",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }

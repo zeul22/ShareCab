@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 
@@ -14,9 +17,11 @@ import 'services/auth_service.dart';
 import 'services/location_service.dart';
 import 'services/notification_service.dart';
 import 'services/ride_flow.dart';
+import 'widgets/co_rider_rating_dialog.dart';
 import 'services/trip_tracking_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/api_config.dart';
+import 'utils/locale_policy.dart';
 import 'widgets/ride_flow_banner.dart';
 
 import 'screens/airport_arrival_screen.dart';
@@ -111,7 +116,6 @@ class ShareCabApp extends StatelessWidget {
     final authService = AuthService(authApi);
     final RideApi rideApi = HttpRideApi(
       tokenGetter: authService.accessTokenForApi,
-      riderIdGetter: () => authService.user?.id,
     );
     // DriverApi piggy-backs on the same auth session — its tokenGetter
     // hands out the rider/driver-agnostic access token. Provided at the
@@ -132,7 +136,7 @@ class ShareCabApp extends StatelessWidget {
         Provider<RideApi>.value(value: rideApi),
         Provider<DriverApi>.value(value: driverApi),
         ChangeNotifierProvider<AuthService>.value(value: authService),
-        ChangeNotifierProvider(create: (_) => LocationService()),
+        ChangeNotifierProvider(create: (_) => LocationService(rideApi: rideApi)),
         ChangeNotifierProvider(create: (_) => RideFlowState(rideApi)),
         // Live-trip tracker: polls /trips/:id/driver-location while the
         // rider is on the RideStatusScreen. Cheap to keep around even
@@ -143,12 +147,25 @@ class ShareCabApp extends StatelessWidget {
         title: 'ShareCab',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
+        supportedLocales: ShareCabLocalePolicy.supportedLocales,
+        localeResolutionCallback: ShareCabLocalePolicy.resolve,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
         navigatorKey: navigatorKey,
         navigatorObservers: [routeObserver],
         // The builder wraps every screen with a bottom-floating banner that
         // surfaces "still searching" / "match found" / "ride in progress"
         // state app-wide, so the rider can navigate around while a search
         // is in flight without losing track of it.
+        //
+        // _CoRiderRatingPump lives in the same wrapper so the rating
+        // dialog can pop over any screen — when a sibling's leg
+        // completes mid-flow, the polling watcher refills the queue
+        // and the pump opens the dialog wherever the user happens
+        // to be.
         builder: (_, child) => Stack(
           children: [
             child!,
@@ -161,6 +178,7 @@ class ShareCabApp extends StatelessWidget {
                 navigatorKey: navigatorKey,
               ),
             ),
+            _CoRiderRatingPump(navigatorKey: navigatorKey),
           ],
         ),
         initialRoute: Routes.splash,
@@ -205,4 +223,98 @@ class ShareCabApp extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Top-level pump that opens the [CoRiderRatingDialog] over whatever
+/// screen is on top whenever [RideFlowState.pendingCoRiderRatings]
+/// becomes non-empty. Sits in the MaterialApp builder so it has
+/// access to the navigator + provider scope without needing screens
+/// to opt in individually.
+///
+/// Concurrency: shows only one dialog at a time. While a dialog is
+/// open the pump no-ops on listener fires; when the dialog closes
+/// the pump dequeues, calls a fresh refresh, and re-checks the
+/// queue so back-to-back prompts surface naturally.
+class _CoRiderRatingPump extends StatefulWidget {
+  final GlobalKey<NavigatorState> navigatorKey;
+  const _CoRiderRatingPump({required this.navigatorKey});
+
+  @override
+  State<_CoRiderRatingPump> createState() => _CoRiderRatingPumpState();
+}
+
+class _CoRiderRatingPumpState extends State<_CoRiderRatingPump> {
+  RideFlowState? _flow;
+  bool _dialogOpen = false;
+  Timer? _periodic;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final flow = context.read<RideFlowState>();
+    if (_flow != flow) {
+      _flow?.removeListener(_onFlowChanged);
+      _flow = flow;
+      flow.addListener(_onFlowChanged);
+      // First pump on attach so we surface anything that was already
+      // pending when the app launched (rider re-opened the app after
+      // a previous ride ended).
+      flow.pumpPendingCoRiderRatings();
+    }
+    // Background refresh while the rider app is foregrounded. 8s
+    // is tight enough that when one co-rider closes shortly after
+    // the other, the second close surfaces on the first's screen
+    // before the user gives up waiting. Cost: one cheap GET per 8s,
+    // server-side filtered, no payload on the empty case.
+    //
+    // (Was 60s — but with the active-trip polling watcher stopping
+    // on close, the first-to-close rider would wait up to a full
+    // minute for the second rider's dialog to appear.)
+    _periodic ??= Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _flow?.pumpPendingCoRiderRatings(),
+    );
+  }
+
+  void _onFlowChanged() {
+    if (!mounted || _dialogOpen) return;
+    final flow = _flow;
+    if (flow == null) return;
+    final queue = flow.pendingCoRiderRatings;
+    if (queue.isEmpty) return;
+    // Defer to the next frame so we don't try to open a dialog
+    // mid-build of the widget tree.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showNext());
+  }
+
+  Future<void> _showNext() async {
+    if (_dialogOpen) return;
+    final flow = _flow;
+    if (flow == null) return;
+    final queue = flow.pendingCoRiderRatings;
+    if (queue.isEmpty) return;
+    final ctx = widget.navigatorKey.currentContext;
+    if (ctx == null) return;
+
+    _dialogOpen = true;
+    try {
+      await CoRiderRatingDialog.show(ctx, pending: queue.first);
+    } finally {
+      _dialogOpen = false;
+      flow.dequeuePendingCoRiderRating();
+      // Re-pump in case the user's rate/skip altered the queue OR a
+      // co-rider's leg completed while the dialog was open.
+      flow.pumpPendingCoRiderRatings();
+    }
+  }
+
+  @override
+  void dispose() {
+    _periodic?.cancel();
+    _flow?.removeListener(_onFlowChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

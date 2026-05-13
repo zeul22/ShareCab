@@ -3,6 +3,7 @@ import 'dart:math';
 import '../../models/driver_live_location.dart';
 import '../../models/match_proposal.dart';
 import '../../models/payment.dart';
+import '../../models/pending_co_rider_rating.dart';
 import '../../models/recent_destination.dart';
 import '../../models/ride.dart';
 import '../../models/ride_search.dart';
@@ -259,5 +260,41 @@ class MockRideApi implements RideApi {
         source: 'haversine',
       ),
     );
+  }
+
+  @override
+  Future<String?> reverseGeocode({required double lat, required double lng}) async {
+    await Future.delayed(_latency());
+    // Mock impl: stable name so the offline / demo flow renders
+    // something sensible rather than a coord string. Real backend
+    // hits Google Maps via geocodingService.
+    return 'Indiranagar, Bengaluru';
+  }
+
+  @override
+  Future<List<PendingCoRiderRating>> getPendingCoRiderRatings() async {
+    await Future.delayed(_latency());
+    // Mock impl: no pending rating prompts. The auto-prompt flow is
+    // exercised against the real backend; the mock stays quiet so
+    // demo / screenshot runs aren't constantly popping the dialog.
+    return const [];
+  }
+
+  @override
+  Future<void> rateCoRider({
+    required String tripId,
+    required String coRiderUserId,
+    required int stars,
+    String? comment,
+  }) async {
+    await Future.delayed(_latency());
+  }
+
+  @override
+  Future<void> skipCoRiderRating({
+    required String tripId,
+    required String coRiderUserId,
+  }) async {
+    await Future.delayed(_latency());
   }
 }

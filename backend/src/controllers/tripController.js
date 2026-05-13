@@ -89,9 +89,30 @@ const estimateSchema = z
   })
   .superRefine(refinePickupDropDistance);
 
+// Parse req.body against a zod schema; on failure throw HttpError(400)
+// with the issue messages joined into a single human string. We use
+// this everywhere a `.parse()` would otherwise throw raw ZodError —
+// raw ZodError has no `.status`, hits the 500 fallthrough, and gets
+// serialised as a JSON blob the rider app then renders on its
+// searching screen as a wall of red text. The messages are already
+// user-facing (custom refines like "Trip is too far…" + "Coordinates
+// must be within India") so passing them through verbatim is right.
+function parseOrHttp400(schema, body) {
+  const parsed = schema.parse ? schema.safeParse(body) : { success: true, data: body };
+  if (parsed.success) return parsed.data;
+  const issues = parsed.error?.issues || [];
+  const messages = issues
+    .map((i) => i.message)
+    .filter((m) => typeof m === 'string' && m.length > 0);
+  const summary = messages.length > 0
+    ? messages.join(' · ')
+    : 'Invalid request payload';
+  throw new HttpError(400, summary, { issues });
+}
+
 async function estimate(req, res, next) {
   try {
-    const data = estimateSchema.parse(req.body);
+    const data = parseOrHttp400(estimateSchema, req.body);
     // Get a real road-following distance + duration from Directions.
     // Cached server-side, so repeated estimates on the same stops within
     // 5 min cost one Google API call.
@@ -128,7 +149,7 @@ async function estimate(req, res, next) {
 
 async function requestTrip(req, res, next) {
   try {
-    const data = requestSchema.parse(req.body);
+    const data = parseOrHttp400(requestSchema, req.body);
 
     // One rider, one in-flight trip. Without this guard a rider can stack
     // multiple `requested` trips by hitting the search button repeatedly,
@@ -402,6 +423,15 @@ async function riderCloseTrip(req, res, next) {
     const now = new Date();
     trip.status = 'completed';
     trip.completedAt = now;
+    // Mark startedAt at close time when nothing else set it. In
+    // rider-only mode there's no driver pickUpRider step to set it,
+    // so without this every rider-only close would silently fail the
+    // rating-eligibility gate (`startedAt != null`) and never trigger
+    // the co-rider rating prompt. The riders coordinated their cab
+    // off-platform; we don't know exactly when they actually started
+    // moving, but the close itself is the canonical "this ride
+    // happened" signal in this mode.
+    if (!trip.startedAt) trip.startedAt = now;
     // No driver to charge → no platform fare. The rider paid their
     // off-platform cab (Uber / Ola / etc.) directly; ShareCab only
     // facilitated the match.
@@ -762,6 +792,13 @@ async function cancelTrip(req, res, next) {
       throw new HttpError(400, `Cannot cancel a ${trip.status} trip`);
     }
 
+    // Captured BEFORE we mutate the trip so the rating recompute below
+    // sees the post-cancel state. Penalty applies only when the rider
+    // had explicitly committed (Find Cab pressed, or solo trip created
+    // with shareEnabled=false which is auto-committed). Pre-commit
+    // cancels are exploratory and don't touch driver supply.
+    const wasCommitted = trip.readyToFindCab === true;
+
     trip.status = 'cancelled';
     trip.cancelledAt = new Date();
     trip.cancelReason = req.body?.reason;
@@ -804,6 +841,23 @@ async function cancelTrip(req, res, next) {
     }
 
     await broadcastTripUpdate(trip);
+
+    // Apply the -0.1 cancel penalty when the rider had committed
+    // (Find Cab pressed, or solo auto-commit). recomputeUserRating
+    // re-derives the score from scratch — Rating avg, RatingSkip
+    // count, and the now-incremented cancel count — so repeat cancels
+    // accumulate naturally with no risk of double-applying. Failures
+    // here are non-fatal: the cancel itself succeeded above, the
+    // recompute is a side effect. Lazy-required to dodge the circular
+    // ratingController → Trip → tripController boot dependency.
+    if (wasCommitted) {
+      try {
+        const { recomputeUserRating } = require('./ratingController');
+        await recomputeUserRating(req.auth.userId);
+      } catch (e) {
+        logger.warn(`[cancel-penalty] recompute failed user=${req.auth.userId}: ${e.message}`);
+      }
+    }
     res.json({ trip });
   } catch (err) {
     next(err);

@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:http/http.dart' as http;
+
+import '../../utils/locale_policy.dart';
 
 /// One autocomplete suggestion from the Places API.
 class PlacePrediction {
@@ -52,22 +55,30 @@ class PlaceDetails {
 ///      and Android package name, or be set to "None" while developing.
 class PlacesService {
   final String apiKey;
+  final String languageCode;
   final http.Client _client;
 
-  PlacesService({required this.apiKey, http.Client? client})
-      : _client = client ?? http.Client();
+  PlacesService({
+    required this.apiKey,
+    String? languageCode,
+    http.Client? client,
+  })  : languageCode = ShareCabLocalePolicy.resolveLanguageCode(
+          languageCode ?? PlatformDispatcher.instance.locale.languageCode,
+        ),
+        _client = client ?? http.Client();
 
-  static const _autocompleteUrl = 'https://places.googleapis.com/v1/places:autocomplete';
+  static const _autocompleteUrl =
+      'https://places.googleapis.com/v1/places:autocomplete';
   static const _detailsUrlBase = 'https://places.googleapis.com/v1/places/';
   // The "new" Places API doesn't include reverse geocoding, so we use the
   // legacy Geocoding API. Same key, different host. Requires the **Geocoding
   // API** to be enabled on the GCP project that owns the key.
-  static const _geocodeUrl = 'https://maps.googleapis.com/maps/api/geocode/json';
+  static const _geocodeUrl =
+      'https://maps.googleapis.com/maps/api/geocode/json';
 
   /// Field mask tells Google which fields to include in the response. Smaller
   /// masks = lower per-request cost.
-  static const _detailsFieldMask =
-      'id,formattedAddress,location,displayName';
+  static const _detailsFieldMask = 'id,formattedAddress,location,displayName';
 
   bool get isConfigured => apiKey.isNotEmpty;
 
@@ -89,6 +100,7 @@ class PlacesService {
       },
       body: jsonEncode({
         'input': input,
+        'languageCode': languageCode,
         // ShareCab is India-only; restrict suggestions to Indian places so a
         // search like "Bangalore" doesn't surface "Bangalore, MA, USA".
         'includedRegionCodes': ['in'],
@@ -108,20 +120,24 @@ class PlacesService {
         .where((p) => p != null)
         .map((p) => p!)
         .map((p) {
-      final structured =
-          (p['structuredFormat'] as Map<String, dynamic>?) ?? const {};
-      final main = (structured['mainText'] as Map<String, dynamic>?)?['text'] as String?;
-      final secondary =
-          (structured['secondaryText'] as Map<String, dynamic>?)?['text'] as String?;
-      return PlacePrediction(
-        placeId: (p['placeId'] as String?) ?? '',
-        description: (p['text'] as Map<String, dynamic>?)?['text'] as String? ??
-            main ??
-            '',
-        primaryText: main ?? '',
-        secondaryText: secondary ?? '',
-      );
-    }).where((p) => p.placeId.isNotEmpty).toList(growable: false);
+          final structured =
+              (p['structuredFormat'] as Map<String, dynamic>?) ?? const {};
+          final main = (structured['mainText']
+              as Map<String, dynamic>?)?['text'] as String?;
+          final secondary = (structured['secondaryText']
+              as Map<String, dynamic>?)?['text'] as String?;
+          return PlacePrediction(
+            placeId: (p['placeId'] as String?) ?? '',
+            description:
+                (p['text'] as Map<String, dynamic>?)?['text'] as String? ??
+                    main ??
+                    '',
+            primaryText: main ?? '',
+            secondaryText: secondary ?? '',
+          );
+        })
+        .where((p) => p.placeId.isNotEmpty)
+        .toList(growable: false);
   }
 
   Future<PlaceDetails?> details(String placeId) async {
@@ -134,7 +150,9 @@ class PlacesService {
     }
 
     final res = await _client.get(
-      Uri.parse('$_detailsUrlBase$placeId'),
+      Uri.parse('$_detailsUrlBase$placeId').replace(
+        queryParameters: {'languageCode': languageCode},
+      ),
       headers: {
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask': _detailsFieldMask,
@@ -170,7 +188,7 @@ class PlacesService {
       'key': apiKey,
       // ShareCab is India-only; bias results to localised Indian addresses.
       'region': 'in',
-      'language': 'en',
+      'language': languageCode,
     });
 
     final res = await _client.get(uri);
@@ -180,7 +198,8 @@ class PlacesService {
     if (body['status'] != 'OK') return null;
     final results = body['results'] as List?;
     if (results == null || results.isEmpty) return null;
-    return (results.first as Map<String, dynamic>)['formatted_address'] as String?;
+    return (results.first as Map<String, dynamic>)['formatted_address']
+        as String?;
   }
 
   void dispose() => _client.close();

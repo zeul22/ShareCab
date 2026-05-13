@@ -12,6 +12,10 @@ const ratingSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-ratingSchema.index({ trip: 1, fromUser: 1 }, { unique: true });
+// One rating per (trip, fromUser, toUser) — lets a rider in a shared
+// trip rate each of their co-riders + the driver as separate Rating
+// rows. Previously the index was (trip, fromUser) which only made
+// sense back when a rider only rated their driver.
+ratingSchema.index({ trip: 1, fromUser: 1, toUser: 1 }, { unique: true });
 
 module.exports = mongoose.model('Rating', ratingSchema);
