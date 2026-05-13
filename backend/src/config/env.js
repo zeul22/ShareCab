@@ -236,6 +236,22 @@ const env = {
     // ₹500 shared-fare saving — small enough to be a casual one-tap, big
     // enough to filter low-intent users.
     pricePaise: num(process.env.UNLOCK_PRICE_PAISE, 5000), // ₹50.00
+    // Dev / demo fallback: when true, the rider app can hit
+    // /unlocks/payment-confirm WITHOUT a Razorpay orderId+signature
+    // and the backend will still mint an Unlock. Used when Razorpay
+    // checkout fails (test creds revoked, sim network issues, etc.)
+    // so demos don't dead-end. MUST be false in production — without
+    // it, anyone could mint free unlocks via the open endpoint.
+    //
+    // Default policy: ENABLED everywhere except when NODE_ENV is
+    // exactly 'production'. Production deployments can still flip it
+    // back on with `UNLOCK_PAYMENT_BYPASS=true` if they need a temp
+    // emergency switch, but the safe-by-default is off there.
+    paymentBypassEnabled: process.env.UNLOCK_PAYMENT_BYPASS === 'true'
+      ? true
+      : process.env.UNLOCK_PAYMENT_BYPASS === 'false'
+        ? false
+        : process.env.NODE_ENV !== 'production',
   },
 };
 

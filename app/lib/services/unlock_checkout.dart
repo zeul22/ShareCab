@@ -142,10 +142,35 @@ class UnlockCheckout {
     if (r.code == Razorpay.PAYMENT_CANCELLED ||
         msg.toLowerCase().contains('cancel')) {
       completer.complete(const UnlockCheckoutCancelled());
-    } else {
-      completer.complete(UnlockCheckoutFailed(
-        msg.isEmpty ? 'Payment failed' : msg,
-      ));
+      return;
+    }
+    // Real Razorpay failure (network drop, sheet crash, invalid creds).
+    // Try the dev / demo bypass — call payment-confirm WITHOUT the
+    // orderId+signature pair. Backend mints the unlock only when
+    // UNLOCK_PAYMENT_BYPASS=true is set on the server; in production
+    // it 402s and we surface the original failure. Either way the
+    // user gets a usable error instead of being silently stuck on
+    // the unlock sheet.
+    _tryPaymentBypass(failureMessage: msg.isEmpty ? 'Payment failed' : msg);
+  }
+
+  Future<void> _tryPaymentBypass({required String failureMessage}) async {
+    final order = _pendingOrder;
+    final completer = _completer;
+    if (order == null || completer == null || completer.isCompleted) return;
+    try {
+      await _api.recordPaymentForUnlock(
+        // orderId intentionally omitted — that's the signal the client
+        // wants the bypass path. Backend gates this on env flag.
+        amountPaise: order.amountPaise,
+        paymentRef: 'bypass_${DateTime.now().millisecondsSinceEpoch}',
+      );
+      completer.complete(const UnlockCheckoutSuccess(wasStub: true));
+    } catch (_) {
+      // Bypass disabled (production) or backend rejected for another
+      // reason — surface the ORIGINAL Razorpay failure so the user
+      // knows the real problem, not the fallback's secondary failure.
+      completer.complete(UnlockCheckoutFailed(failureMessage));
     }
   }
 

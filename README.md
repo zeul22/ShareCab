@@ -181,6 +181,14 @@ Full setup with env vars + first-run sanity check in [docs/getting-started.md](.
 
 ---
 
+## Localization
+
+ShareCab is built for India, so the rider and driver apps resolve the device locale instead of assuming English-only usage. The first supported locale set is English plus Assamese, Bengali, Gujarati, Hindi, Kannada, Malayalam, Marathi, Nepali, Odia, Punjabi, Tamil, Telugu, and Urdu. This keeps platform UI and map/place results aligned with the rider's language where Flutter and the underlying APIs support it.
+
+App-specific copy can be translated incrementally from this baseline without changing the locale policy.
+
+---
+
 ## Brand
 
 - **Name:** ShareCab

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../models/luggage.dart';
 import '../models/match_proposal.dart';
 import '../models/payment.dart';
+import '../models/pending_co_rider_rating.dart';
 import '../models/place.dart';
 import '../models/ride.dart';
 import '../models/ride_search.dart';
@@ -79,6 +80,20 @@ class RideFlowState extends ChangeNotifier {
   // cleared the moment a screen consumes it (see clearCoRiderLost).
   bool _coRiderLostPending = false;
 
+  // Queue of co-rider rating prompts the user still owes a decision on.
+  // Populated by `pumpPendingCoRiderRatings`, which a top-level listener
+  // (CoRiderRatingPump in main.dart) calls on a timer + on every
+  // ride-completed status transition the polling watcher detects.
+  // Dialogs read from `pendingCoRiderRatings.first`, pop, then call
+  // `dequeuePendingCoRiderRating()` regardless of outcome — entries that
+  // were dismissed without rate/skip will reappear on the next pump.
+  final List<PendingCoRiderRating> _pendingCoRiderRatings = [];
+
+  /// Tracks pumps already in flight so a burst of completion events
+  /// (multiple poll ticks landing back-to-back) doesn't fan out into
+  /// N concurrent network calls.
+  bool _pendingRatingsPumpInFlight = false;
+
   FlowStage get stage => _stage;
   RideSearch get search => _search;
   List<MatchProposal> get proposals => _proposals;
@@ -89,6 +104,67 @@ class RideFlowState extends ChangeNotifier {
   String? get toastMessage => _toastMessage;
   DateTime? get searchStartedAt => _searchStartedAt;
   bool get coRiderLostPending => _coRiderLostPending;
+
+  /// Read-only snapshot of pending co-rider rating prompts. A
+  /// top-level listener pops one dialog at a time off the front of
+  /// this list and calls [dequeuePendingCoRiderRating] when done.
+  List<PendingCoRiderRating> get pendingCoRiderRatings =>
+      List.unmodifiable(_pendingCoRiderRatings);
+
+  /// Re-fetch the user's pending co-rider rating prompts from the
+  /// backend, merge into [pendingCoRiderRatings], and notify listeners.
+  /// Idempotent + non-throwing — the rating flow is a soft prompt, so
+  /// a network error here just leaves the queue as-is and we'll try
+  /// again on the next pump tick.
+  Future<void> pumpPendingCoRiderRatings() async {
+    if (_pendingRatingsPumpInFlight) return;
+    _pendingRatingsPumpInFlight = true;
+    try {
+      final fresh = await _api.getPendingCoRiderRatings();
+      // Replace the list rather than append — server is the source of
+      // truth (already filters out rated + skipped pairs), so a
+      // shrinking response means we're catching up to consumed items.
+      _pendingCoRiderRatings
+        ..clear()
+        ..addAll(fresh);
+      notifyListeners();
+    } catch (_) {
+      // Soft-fail. Next pump tick retries.
+    } finally {
+      _pendingRatingsPumpInFlight = false;
+    }
+  }
+
+  /// Remove the front-of-queue prompt — used by the dialog host after
+  /// it pops a dialog, regardless of whether the user rated, skipped,
+  /// or dismissed. A dismissed entry will reappear on the next pump.
+  void dequeuePendingCoRiderRating() {
+    if (_pendingCoRiderRatings.isEmpty) return;
+    _pendingCoRiderRatings.removeAt(0);
+    notifyListeners();
+  }
+
+  /// Fire a short burst of [pumpPendingCoRiderRatings] calls over the
+  /// next ~30 seconds. Called immediately after the rider closes their
+  /// own trip — at that moment the co-rider's leg is usually still
+  /// `matched` (the popup query requires sibling status=completed +
+  /// startedAt set), but the co-rider tends to close within seconds
+  /// of the first close. Without this burst the closer would wait for
+  /// the 8s safety pump tick; with it the dialog surfaces almost
+  /// immediately once the co-rider closes.
+  ///
+  /// Each call is concurrency-safe (pumpPendingCoRiderRatings has an
+  /// in-flight guard), and cheap on the server (small filtered query).
+  void burstPumpPendingCoRiderRatings() {
+    // 1s, 3s, 6s, 12s, 20s, 30s — front-loaded so the typical
+    // "both rider close within 10s of each other" case is caught fast,
+    // tapering so we don't keep hammering for stragglers.
+    for (final delaySeconds in const [1, 3, 6, 12, 20, 30]) {
+      Timer(Duration(seconds: delaySeconds), () {
+        pumpPendingCoRiderRatings();
+      });
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Search building
@@ -539,6 +615,19 @@ class RideFlowState extends ChangeNotifier {
           ride.status == RideStatus.driverAssigned) {
         _toastMessage =
             'A driver accepted your trip — they\'re on the way.';
+      }
+
+      // Any transition into `completed` is the signal to (re-)check
+      // pending co-rider ratings — covers BOTH "my leg just finished"
+      // (the rider currently using the app) AND "a co-rider's leg
+      // finished" (the leg fetched here belongs to the current user,
+      // but the pending list is a per-USER query so siblings show up
+      // the moment their leg flips). Fire-and-forget; the pump method
+      // itself is concurrency-safe.
+      if (previousStatus != null &&
+          previousStatus != RideStatus.completed &&
+          ride.status == RideStatus.completed) {
+        pumpPendingCoRiderRatings();
       }
 
       // Always sync state — even if rider count unchanged, status (driver

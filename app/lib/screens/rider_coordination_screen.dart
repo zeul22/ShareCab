@@ -64,9 +64,17 @@ class _RiderCoordinationScreenState extends State<RiderCoordinationScreen> {
       final api = context.read<RideApi>();
       await api.closeRiderTrip(ride.id);
       if (!mounted) return;
+      final flow = context.read<RideFlowState>();
+      // Immediate + burst pump. The immediate call surfaces the
+      // dialog if the co-rider already closed; the burst catches
+      // the typical case where the co-rider closes within a few
+      // seconds of us. Without the burst, the closer's only fallback
+      // is the 8s safety tick from the top-level pump widget.
+      flow.pumpPendingCoRiderRatings();
+      flow.burstPumpPendingCoRiderRatings();
       // Clear the local ride flow state so the home screen doesn't
       // restore us back into this screen via the resume flow.
-      context.read<RideFlowState>().clearAfterClose();
+      flow.clearAfterClose();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(

@@ -9,6 +9,7 @@ import '../../models/luggage.dart';
 import '../../models/match_proposal.dart';
 import '../../models/passenger.dart';
 import '../../models/payment.dart';
+import '../../models/pending_co_rider_rating.dart';
 import '../../models/place.dart';
 import '../../models/recent_destination.dart';
 import '../../models/ride.dart';
@@ -19,7 +20,6 @@ import '../../utils/api_config.dart';
 import 'ride_api.dart';
 
 typedef AsyncTokenGetter = Future<String?> Function();
-typedef RiderIdGetter = String? Function();
 
 /// HTTP implementation of [RideApi] — talks to ShareCab backend at
 /// `${ApiConfig.apiRoot}/trips`, `/unlocks`, etc.
@@ -39,7 +39,6 @@ class HttpRideApi implements RideApi {
   final http.Client _client;
   final String _root;
   final AsyncTokenGetter _tokenGetter;
-  final RiderIdGetter _riderIdGetter;
 
   /// In-memory map of {clientSessionId → backend trip._id}, set when
   /// findDestinationMatches creates the trip and read by acceptMatch /
@@ -53,13 +52,11 @@ class HttpRideApi implements RideApi {
 
   HttpRideApi({
     required AsyncTokenGetter tokenGetter,
-    required RiderIdGetter riderIdGetter,
     http.Client? client,
     String? apiRoot,
   })  : _client = client ?? http.Client(),
         _root = apiRoot ?? ApiConfig.apiRoot,
-        _tokenGetter = tokenGetter,
-        _riderIdGetter = riderIdGetter;
+        _tokenGetter = tokenGetter;
 
   // ---------------------------------------------------------------------------
   // RideApi surface
@@ -182,17 +179,17 @@ class HttpRideApi implements RideApi {
 
   @override
   Future<void> recordAdRewardForUnlock({required int adsCompleted}) async {
-    final riderId = _riderIdGetter();
-    if (riderId == null) {
-      throw Exception('Not signed in — cannot record ad reward');
-    }
-    await _post('/unlocks/ad-reward', {
-      'riderId': riderId,
-      'adsCompleted': adsCompleted,
-      // Per-attempt nonce so the eventual AdMob SSV path can dedupe.
-      // Today the backend doesn't store this, but it's cheap to send.
-      'externalRef': 'app-${DateTime.now().millisecondsSinceEpoch}',
-    });
+    // Rider id is taken from the JWT server-side; nothing to send here.
+    await _post(
+      '/unlocks/ad-reward',
+      {
+        'adsCompleted': adsCompleted,
+        // Per-attempt nonce so the eventual AdMob SSV path can dedupe.
+        // Today the backend doesn't store this, but it's cheap to send.
+        'externalRef': 'app-${DateTime.now().millisecondsSinceEpoch}',
+      },
+      auth: true,
+    );
   }
 
   @override
@@ -202,17 +199,20 @@ class HttpRideApi implements RideApi {
     required String paymentRef,
     String? signature,
   }) async {
-    final riderId = _riderIdGetter();
-    if (riderId == null) {
-      throw Exception('Not signed in — cannot record payment');
-    }
-    await _post('/unlocks/payment-confirm', {
-      'riderId': riderId,
-      if (orderId != null) 'orderId': orderId,
-      'externalRef': paymentRef,
-      'amountPaise': amountPaise,
-      if (signature != null) 'signature': signature,
-    });
+    // Rider id is now taken from the JWT server-side. Previously we
+    // passed it in the body, which (a) was redundant and (b) was the
+    // most likely 500 cause: a non-ObjectId-shaped string here crashed
+    // Mongoose's Unlock.create cast.
+    await _post(
+      '/unlocks/payment-confirm',
+      {
+        if (orderId != null) 'orderId': orderId,
+        'externalRef': paymentRef,
+        'amountPaise': amountPaise,
+        if (signature != null) 'signature': signature,
+      },
+      auth: true,
+    );
   }
 
   @override
@@ -252,6 +252,69 @@ class HttpRideApi implements RideApi {
     final res = await _get('/trips/$tripId/driver-location', auth: true);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     return DriverLocationResponse.fromJson(body);
+  }
+
+  @override
+  Future<String?> reverseGeocode({required double lat, required double lng}) async {
+    try {
+      final res = await _get(
+        '/geo/reverse?lat=${lat.toString()}&lng=${lng.toString()}',
+        auth: true,
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final name = (body['name'] as String?)?.trim();
+      return (name != null && name.isNotEmpty) ? name : null;
+    } catch (_) {
+      // Reverse-geocoding is best-effort. Network failures, expired
+      // tokens, missing Maps key — all should let the caller fall
+      // back to "Current location" rather than blocking trip flow.
+      return null;
+    }
+  }
+
+  @override
+  Future<List<PendingCoRiderRating>> getPendingCoRiderRatings() async {
+    final res = await _get('/ratings/pending', auth: true);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final arr = (body['pending'] as List?) ?? const [];
+    return arr
+        .whereType<Map<String, dynamic>>()
+        .map(PendingCoRiderRating.fromJson)
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> rateCoRider({
+    required String tripId,
+    required String coRiderUserId,
+    required int stars,
+    String? comment,
+  }) async {
+    await _post(
+      '/ratings/',
+      {
+        'tripId': tripId,
+        'toUserId': coRiderUserId,
+        'stars': stars,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+      },
+      auth: true,
+    );
+  }
+
+  @override
+  Future<void> skipCoRiderRating({
+    required String tripId,
+    required String coRiderUserId,
+  }) async {
+    await _post(
+      '/ratings/skip',
+      {
+        'tripId': tripId,
+        'toUserId': coRiderUserId,
+      },
+      auth: true,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -342,8 +405,11 @@ class HttpRideApi implements RideApi {
   ///   - Trip is solo (no group, just a driver) → proposal lists only this rider.
   MatchProposal _buildProposalFromTrip(Map<String, dynamic> trip, RideSearch search) {
     final tripId = trip['_id'] as String;
-    final group = trip['matchGroup'] as Map<String, dynamic>?;
-    final driver = trip['driver'] as Map<String, dynamic>?;
+    // matchGroup + driver are sometimes populated (live trip fetch) and
+    // sometimes bare ObjectId strings (/trips/mine). _asMap collapses
+    // the latter to null instead of throwing on the cast.
+    final group = _asMap(trip['matchGroup']);
+    final driver = _asMap(trip['driver']);
     final vehicleType = _vehicleTypeFromCapacity(driver?['vehicle']?['capacity'] as num?);
 
     final coPassengers = <Passenger>[];
@@ -498,7 +564,12 @@ class HttpRideApi implements RideApi {
 
   Ride _buildRideFromTrip(Map<String, dynamic> trip) {
     final tripId = trip['_id'] as String;
-    final driverDoc = trip['driver'] as Map<String, dynamic>?;
+    // Endpoints differ on whether they populate `driver`: live-trip
+    // fetches return a populated Map, but /trips/mine returns it as a
+    // bare ObjectId string (no populate). Treat the string as "not
+    // populated" instead of casting it to Map — the latter throws and
+    // hangs every screen reading history.
+    final driverDoc = _asMap(trip['driver']);
     final search = RideSearch(
       pickup: Place.fromJson(trip['pickup'] as Map<String, dynamic>),
       dropoff: Place.fromJson(trip['dropoff'] as Map<String, dynamic>),
@@ -649,6 +720,15 @@ class HttpRideApi implements RideApi {
   String _generateOtp() {
     final n = DateTime.now().microsecondsSinceEpoch % 10000;
     return n.toString().padLeft(4, '0');
+  }
+
+  /// Returns [value] when it's a `Map<String, dynamic>`, else null.
+  /// Use anywhere a backend field could be EITHER a populated object OR
+  /// a bare ObjectId string depending on which endpoint we hit. A direct
+  /// `as Map<String, dynamic>?` cast throws on a string — this swallows
+  /// the "not populated" case cleanly.
+  Map<String, dynamic>? _asMap(dynamic value) {
+    return value is Map<String, dynamic> ? value : null;
   }
 }
 

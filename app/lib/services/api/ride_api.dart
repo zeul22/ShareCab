@@ -1,6 +1,7 @@
 import '../../models/driver_live_location.dart';
 import '../../models/match_proposal.dart';
 import '../../models/payment.dart';
+import '../../models/pending_co_rider_rating.dart';
 import '../../models/recent_destination.dart';
 import '../../models/ride.dart';
 import '../../models/ride_search.dart';
@@ -113,6 +114,50 @@ abstract class RideApi {
   /// Throws when no driver is assigned yet (404) or the driver hasn't
   /// pushed any location since coming online.
   Future<DriverLocationResponse> getDriverLocation(String tripId);
+
+  /// Reverse-geocode `(lat, lng)` to a short human-readable place name
+  /// (e.g. "Indiranagar, Bengaluru"). Used by [LocationService] the
+  /// moment a current-location pin is captured so the trip is persisted
+  /// with a meaningful pickup address — ride history and analytics
+  /// then surface real names instead of every row reading "Current
+  /// location". Returns null on any error so callers can fall back.
+  Future<String?> reverseGeocode({required double lat, required double lng});
+
+  // ---------------------------------------------------------------------------
+  // Co-rider rating flow.
+  //
+  // Effective rating math (backend-enforced, mirrored in docs):
+  //   rating = clamp(avg(received Ratings.stars) - 0.25 * count(my skips), 1, 5)
+  //
+  // Endpoints below are idempotent per (trip, fromUser, toUser) — repeat
+  // calls return 409. The rider app's polling watcher fetches pending
+  // entries on every tick, opens a CoRiderRatingDialog, and either rates
+  // or explicitly skips. Dismissing the dialog without choosing leaves
+  // the entry pending for the next prompt.
+  // ---------------------------------------------------------------------------
+
+  /// List co-riders this user still owes a rate-or-skip decision on.
+  /// Server-side filter excludes already-rated, already-skipped, and
+  /// trips older than 7d. Empty list when nothing pending.
+  Future<List<PendingCoRiderRating>> getPendingCoRiderRatings();
+
+  /// Submit a star rating for a co-rider. Server rejects if the
+  /// co-rider's leg hasn't completed yet, or if the pair was already
+  /// rated / skipped (409).
+  Future<void> rateCoRider({
+    required String tripId,
+    required String coRiderUserId,
+    required int stars,
+    String? comment,
+  });
+
+  /// Explicitly skip rating a co-rider. Applies a -0.25 penalty to
+  /// THIS rider's own rating (floored at 1.0). The skip is durable;
+  /// the app won't re-prompt for the same pair afterwards.
+  Future<void> skipCoRiderRating({
+    required String tripId,
+    required String coRiderUserId,
+  });
 }
 
 /// Razorpay order details returned by `POST /unlocks/order`. Same shape

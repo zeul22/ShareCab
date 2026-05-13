@@ -7,6 +7,7 @@ Cross-cutting docs for the ShareCab monorepo. Per-service deep dives live alongs
 ### Start here
 - [Architecture](architecture.md) — what the four services are, how they fit together, where state lives.
 - [Getting Started](getting-started.md) — clone, install, and run everything locally in 15 minutes.
+- [Roadmap](roadmap.md) — phased plan for open-sourcing the codebase + the KYC, safety, and admin work that has to land before public release.
 
 ### Building & shipping
 - [Deployment](deployment.md) — GCP Cloud Run + MongoDB Atlas; the production target.
