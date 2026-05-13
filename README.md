@@ -146,6 +146,24 @@ Per-service deep dives live alongside the code: [backend/docs/api.md](./backend/
 
 ---
 
+## Community and Source Availability
+
+ShareCab is public-source/source-available, not MIT-licensed and not OSI-approved open source. The code is available for transparency, review, learning, and noncommercial collaboration while commercial app, service, and production ride-hailing use remains reserved for the official ShareCab project unless separately licensed.
+
+Key project policies:
+
+- [License](./LICENSE.md)
+- [Contribution guidelines](./CONTRIBUTING.md)
+- [Contributor license terms](./CONTRIBUTOR_LICENSE_TERMS.md)
+- [Code of conduct](./CODE_OF_CONDUCT.md)
+- [Security policy](./SECURITY.md)
+- [Support policy](./SUPPORT.md)
+- [Governance](./GOVERNANCE.md)
+- [Trademark policy](./TRADEMARKS.md)
+- [Public repository boundaries](./docs/OPEN_SOURCE.md)
+
+---
+
 ## Quick Start
 
 Each app has its own setup details, but the full local stack can be started from the service folders:
@@ -200,4 +218,4 @@ App-specific copy can be translated incrementally from this baseline without cha
 
 ## License
 
-MIT
+Source-available under the PolyForm Noncommercial License 1.0.0. See [LICENSE.md](./LICENSE.md).

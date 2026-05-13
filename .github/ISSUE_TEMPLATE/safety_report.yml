@@ -1,0 +1,42 @@
+name: Safety or privacy concern
+description: Report a non-urgent safety, privacy, or policy concern.
+title: "[Safety]: "
+labels: ["safety", "privacy", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not use this form for emergencies or private vulnerabilities. For security vulnerabilities, follow SECURITY.md. For live ride emergencies, use the official app and local emergency services.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the concern without exposing private user data.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rider safety
+        - Driver safety
+        - Privacy
+        - Payments
+        - Identity/KYC
+        - Dispatch/trip lifecycle
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who could be affected and how?
+    validations:
+      required: true
+  - type: textarea
+    id: suggested_fix
+    attributes:
+      label: Suggested fix
+

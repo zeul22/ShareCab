@@ -1,6 +1,6 @@
-# ShareCab roadmap — open-source, safety, KYC
+# ShareCab roadmap — source-available release, safety, KYC
 
-This document is the authoritative roadmap for taking ShareCab from its current "MVP that matches riders + dispatches drivers" state to a platform that can credibly run real commercial rides AND be released as open source. It supersedes any informal notes.
+This document is the authoritative roadmap for taking ShareCab from its current "MVP that matches riders + dispatches drivers" state to a platform that can credibly run real commercial rides AND be released as a public source-available project. It supersedes any informal notes.
 
 The document is intentionally phased — each phase is a defensible 1–3 day chunk of work, ordered so an earlier phase doesn't block a later one. Do not skip ahead; the phases are sequenced for a reason.
 
@@ -19,7 +19,7 @@ Concretely: a driver only enters the dispatch candidate pool when their `Driver.
 
 These were resolved before this roadmap was written and apply to every phase:
 
-- **Open-source preparation = files + boundary docs only.** No monorepo restructure into `apps/`/`packages/`/`server/` unless and until there's a concrete reason (a public mirror gating it, a code-share dependency, etc.). Restructure has zero product value and a high churn cost — see [Phase 2](#phase-2--open-source-readiness-files--boundary-docs).
+- **Source-available preparation = files + boundary docs only.** No monorepo restructure into `apps/`/`packages/`/`server/` unless and until there's a concrete reason (a public mirror gating it, a code-share dependency, etc.). Restructure has zero product value and a high churn cost — see [Phase 2](#phase-2--source-available-readiness-files--boundary-docs).
 - **KYC vendor = interface + stub for now.** Real vendor wiring (Surepass / IDfy / HyperVerge / etc.) is deferred to [Phase 10](#phase-10--kyc-vendor-wiring-real). The interface is designed in [Phase 3](#phase-3--kyc-provider-interface--stub) so swapping a vendor in later is a one-file change.
 - **Yellow-plate validation = manual review now, RC API later.** Driver uploads plate photo + ticks "commercial" + admin reviews. Schema is shaped so an RC API can fill the fields automatically once a KYC vendor is wired (Phase 10). See [Phase 1](#phase-1--verification-state-machine--ride-eligibility-gate).
 
@@ -45,15 +45,15 @@ What ShareCab does NOT yet have (and is therefore in scope for this roadmap):
 - Safety: SOS, share-trip-link, route-deviation detection, long-stop detection.
 - Complaint / dispute / refund flow.
 - Admin dashboard (any kind, backend or UI).
-- Open-source files (LICENSE, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT).
+- Source-available/community files (LICENSE, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT).
 - Rider verification beyond phone OTP.
 - Audit logs for admin actions.
 
-## What's open vs what's private
+## What's public vs what's private
 
-Source of truth for the open-source split. When in doubt, default to PRIVATE.
+Source of truth for the public/private split. When in doubt, default to PRIVATE.
 
-**Safe to open-source (= rider/driver/web apps + non-sensitive shared code):**
+**Safe to publish (= rider/driver/web apps + non-sensitive shared code):**
 - [`app/`](../app/) — rider Flutter app, UI and logic
 - [`driver/`](../driver/) — driver Flutter app, UI and logic
 - [`website/`](../website/) — Next.js marketing site
@@ -77,7 +77,7 @@ Source of truth for the open-source split. When in doubt, default to PRIVATE.
 - `.env*` files of any kind in production
 - Logs (which contain PII regardless of best efforts)
 
-The split is enforced by **what gets committed to the public repo**, not by directory structure. We do NOT restructure into `apps/`/`packages/`/`server/`/`private-services/` — Phase 2 just documents the boundary and adds the OSS files. Splitting public vs private repos can happen later if there's a real need.
+The split is enforced by **what gets committed to the public repo**, not by directory structure. We do NOT restructure into `apps/`/`packages/`/`server`/`private-services/` — Phase 2 just documents the boundary and adds the public project files. Splitting public vs private repos can happen later if there's a real need.
 
 ---
 
@@ -87,7 +87,7 @@ The split is enforced by **what gets committed to the public repo**, not by dire
                        Phase 1   verification state machine + ride-eligibility gate
                           │
                           ▼
-                       Phase 2   open-source readiness (files + boundary docs)
+                       Phase 2   source-available readiness (files + boundary docs)
                           │
                           ▼
                        Phase 3   KYC provider interface + stub
@@ -154,23 +154,23 @@ Phases 5, 6, 7 are independent and can run in parallel by different people. Ever
 
 ---
 
-### Phase 2 — Open-source readiness (files + boundary docs)
+### Phase 2 — Source-available readiness (files + boundary docs)
 
 **Why second**: small, additive, doesn't touch product code. Good "next chunk" for anyone helping.
 
 **Scope:**
 
-1. `LICENSE` at repo root — MIT (recommended) or Apache 2.0. MIT keeps the door open the widest. Use the standard template; don't write a custom license.
+1. `LICENSE.md` at repo root — source-available under PolyForm Noncommercial 1.0.0, because the official ShareCab apps and services remain commercial product surfaces.
 2. `CONTRIBUTING.md` at repo root — covers fork/clone setup (link to `docs/getting-started.md`), commit style, PR review expectations, test requirements.
 3. `CODE_OF_CONDUCT.md` at repo root — Contributor Covenant 2.1 (industry standard, no need to invent).
 4. `SECURITY.md` at repo root — how to report a vulnerability privately (a single email address) + disclosure window expectations + "what we won't pay for" (DoS, theoretical issues, etc.).
-5. `docs/OPEN_SOURCE.md` — explicit list of "what's open / what's private" lifted from the [What's open vs what's private](#whats-open-vs-whats-private) section above, with rules for adding new modules to either side.
+5. `docs/OPEN_SOURCE.md` — explicit list of "what's public / what's private" lifted from the [What's open vs what's private](#whats-open-vs-whats-private) section above, with rules for adding new modules to either side.
 6. `.env.example` files in `backend/`, `app/` (via `--dart-define`), `driver/`, `website/`. Real `.env*` files in `.gitignore` (already are; verify).
 7. Repo-wide secret scrub: `git log --all -- '**/*.env'` to confirm nothing slipped in historically. If something did, document it in `SECURITY.md` + rotate the credential.
 
 **Out of scope**: monorepo restructure. Public-mirror release. Splitting "private services" into a separate repo. All those wait for Phase 9.
 
-**Deliverable**: repo is presentable + has the legal/community files an OSS project needs. Boundary is documented but not enforced (still one repo).
+**Deliverable**: repo is presentable + has the legal/community files a public source-available project needs. Boundary is documented but not enforced (still one repo).
 
 ---
 
@@ -193,7 +193,7 @@ Phases 5, 6, 7 are independent and can run in parallel by different people. Ever
    }
    ```
    `KycResult` carries `{ status, providerRefId, rawResponse, verifiedFields, expiresAt? }`. Inputs are typed with required fields only — no provider-specific shape leaks here.
-2. Implement `StubKycProvider` that auto-approves any input that looks structurally valid (4-letter–4-digit PAN regex, 12-digit Aadhaar, etc.) and rejects anything obviously wrong. Returns a fake `providerRefId` so the audit trail looks like the real thing. This is what dev + CI + the open-source demo all run against.
+2. Implement `StubKycProvider` that auto-approves any input that looks structurally valid (4-letter–4-digit PAN regex, 12-digit Aadhaar, etc.) and rejects anything obviously wrong. Returns a fake `providerRefId` so the audit trail looks like the real thing. This is what dev + CI + the source-available demo all run against.
 3. Wire a single env var `KYC_PROVIDER` (default `stub`) that selects the implementation. Production sets it to whatever vendor we eventually wire (Phase 10).
 4. All KYC writes go through `kycService.runCheck(check)`, which:
    - Persists a `KycCheck` document (new collection) with `{ driverId, kind, status, providerRefId, requestedAt, completedAt, expiresAt }`
@@ -418,7 +418,7 @@ The matching engine ([`backend/src/services/matchingService.js`](../backend/src/
 
 These are not blockers but the team should answer them before they bite. None of them stop Phase 1 from shipping.
 
-1. **License**: MIT or Apache 2.0? MIT is shorter; Apache covers patent grants. Pick before Phase 2 ships the LICENSE file.
+1. **License review**: source-available terms are now drafted around PolyForm Noncommercial 1.0.0. Have counsel review before the repository becomes public.
 2. **Public mirror vs single repo** for Phase 9 — settle before going public.
 3. **Police verification flow** is referenced in the prompt but the mechanism varies state to state. Recommendation: stub it as a manual admin action (upload a clearance certificate, admin marks `documents.police.status='VERIFIED'`) until volume justifies automation.
 4. **Geographic scope** — the brief says "yellow-plate" which is India-specific. If we ever cross borders we'll need a per-country eligibility rule. Punt for now.
