@@ -8,8 +8,9 @@ export default function PricingPage() {
       <section className="container-page pt-20 pb-6">
         <h1 className="h-display max-w-3xl">Simple pricing. Real savings.</h1>
         <p className="mt-6 text-lg muted max-w-2xl">
-          ShareCab uses a flat fare model: a small base, a per-km rate, and a per-minute rate.
-          When you share, the total fare drops, and everyone splits what&rsquo;s left.
+          ShareCab calculates fares server-side in paise with base fares, distance bands,
+          per-minute charges, booking fees, optional GST, surge windows, and shared-fare
+          allocation. Riders see the split before committing.
         </p>
       </section>
 
@@ -50,7 +51,8 @@ export default function PricingPage() {
           <Example trip="8 km, 22 min" solo="₹148" shared="₹104" />
         </div>
         <p className="mt-6 text-sm muted">
-          Examples assume two riders sharing. With three riders, savings are even higher.
+          Examples are illustrative and assume two riders sharing. Actual fares depend on
+          distance, time, vehicle class, route, configured city pricing, and tax settings.
         </p>
       </Section>
 
@@ -86,6 +88,11 @@ export default function PricingPage() {
           Solo rides have no unlock requirement — you only see the gate when sharing is on. Drivers
           pay a flat ₹199/month subscription instead of per-ride commissions, with the first month
           free.
+        </p>
+        <p className="mt-3 text-sm muted">
+          In public demo mode, the same unlock state machine can run with AdMob test ads,
+          Razorpay test mode, or stub confirmations. Production keys and webhook secrets
+          stay out of the public repository.
         </p>
       </Section>
     </>

@@ -5,7 +5,7 @@ export const metadata = { title: 'How it works — ShareCab' };
 const steps = [
   {
     title: 'Sign in with OTP',
-    text: 'One-time SMS OTP — no passwords, no anonymous accounts. New phones auto-create a rider profile on first verify.',
+    text: 'Production uses the MSG91 Flutter OTP widget and backend access-token verification. Local demo mode can use a clearly gated dev OTP fallback.',
   },
   {
     title: 'Set pickup, drop, and luggage',
@@ -13,7 +13,7 @@ const steps = [
   },
   {
     title: 'Unlock matching',
-    text: 'Watch 2 short rewarded ads, OR pay a small one-shot unlock fee. That’s how shared rides stay free of per-trip commission — drivers keep more, riders pay less.',
+    text: 'Watch rewarded ads, or pay a small one-shot unlock fee through Razorpay. Public demo mode can use test/stub providers while preserving the same backend state transitions.',
   },
   {
     title: 'Confirm your match in 60 seconds',
@@ -64,7 +64,29 @@ export default function HowItWorksPage() {
         eyebrow="Behind the scenes"
         title="Matching tuned for short trips."
         intro="ShareCab’s engine is built specifically for city trips. We look at pickup proximity, drop proximity, and detour cost. We don’t pair you with riders going far out of the way — even if it saves more on paper."
-      />
+      >
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <Metric title="Pickup radius" value="2 km" />
+          <Metric title="Drop radius" value="4 km" />
+          <Metric title="Max riders" value="3" />
+          <Metric title="Demo mode" value="Rider-first" />
+        </div>
+        <p className="mt-6 text-sm muted max-w-3xl">
+          The public source release keeps rider-side planning, matching, pricing,
+          unlocks, and trip state functional. Real production driver dispatch is
+          gated behind private configuration so demo builds do not connect to live
+          driver operations.
+        </p>
+      </Section>
     </>
+  );
+}
+
+function Metric({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-white border border-ink-300/40 p-6">
+      <div className="text-xs font-semibold uppercase tracking-wider text-brand-700">{title}</div>
+      <div className="mt-2 text-2xl font-semibold">{value}</div>
+    </div>
   );
 }

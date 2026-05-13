@@ -10,9 +10,9 @@ export default function AboutPage() {
           We&rsquo;re building cheaper, smarter rides for everyday city trips.
         </h1>
         <p className="mt-6 text-lg muted max-w-2xl">
-          ShareCab exists because most short cab rides cost more than they should — and most
-          riders don&rsquo;t mind sharing if it saves them money. We match you with someone
-          heading the same way and split the fare.
+          ShareCab exists because many short cab rides are duplicated: two or three people
+          travel in the same direction, but each books separately. We are building a structured
+          way to match compatible riders, split fares, and coordinate the ride safely.
         </p>
       </section>
 
@@ -20,6 +20,12 @@ export default function AboutPage() {
         eyebrow="Our mission"
         title="Make city travel affordable, fair, and simple."
         intro="We focus only on short-distance shared rides — the trips you take to work, to a friend's place, to the metro, to dinner. The simpler the route, the better we do."
+      />
+
+      <Section
+        eyebrow="Public-source direction"
+        title="Transparent by design, protected where it matters."
+        intro="ShareCab is being prepared as a source-available project under PolyForm Shield. The rider-side mechanics, matching, pricing, unlocks, and backend state transitions are intended to be reviewable; production driver operations, provider credentials, fraud controls, KYC, and safety playbooks remain private."
       />
 
       <Section

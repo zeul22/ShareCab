@@ -13,7 +13,7 @@ const inter = Inter({
 });
 
 const description =
-  'ShareCab matches you with nearby riders heading the same way, so you save on every short trip — without giving up convenience.';
+  'ShareCab is a source-available cab-sharing platform for India, with rider matching, ad/payment unlocks, driver dispatch flows, and a documented public demo boundary.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(env.siteUrl),

@@ -11,24 +11,25 @@ export default function HomePage() {
         <div className="container-page pt-20 pb-16 sm:pt-28 sm:pb-24 grid lg:grid-cols-2 gap-12 items-center">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-700">
-              Cheaper rides for short trips
+              Source-available cab sharing for India
             </div>
             <h1 className="mt-5 h-display">
               Share the cab.<br />
               <span className="text-brand-600">Split the fare.</span>
             </h1>
             <p className="mt-6 text-lg muted max-w-xl">
-              ShareCab matches you with riders going within 2–4 km of your destination,
-              so you save on every short trip without giving up convenience.
+              ShareCab matches riders heading the same way, unlocks serious matches
+              through ads or payment, and coordinates the trip with OTP, chat, fare
+              sharing, and realtime state.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href="/how-it-works" className="btn-primary">See how it works</Link>
-              <Link href="/pricing" className="btn-secondary">View pricing</Link>
+              <Link href="/technology" className="btn-secondary">Explore the stack</Link>
             </div>
             <div className="mt-10 flex items-center gap-6 text-sm muted">
-              <div><span className="font-semibold text-ink-900">30%+</span> typical savings</div>
-              <div><span className="font-semibold text-ink-900">2 min</span> avg wait</div>
-              <div><span className="font-semibold text-ink-900">4.8★</span> driver rating</div>
+              <div><span className="font-semibold text-ink-900">2–4 km</span> matching radius</div>
+              <div><span className="font-semibold text-ink-900">Ads/pay</span> unlocks</div>
+              <div><span className="font-semibold text-ink-900">Shield</span> licensed</div>
             </div>
           </div>
 
@@ -63,7 +64,7 @@ export default function HomePage() {
       <Section
         eyebrow="Why ShareCab"
         title="Built end-to-end for shared short trips."
-        intro="Most cab rides are under 8 km. Every screen, every API call, every minute of the ride is optimised for shorter, shared journeys."
+        intro="ShareCab is not just a booking screen. It includes rider matching, unlocks, fare allocation, OTP verification, driver dispatch flows, realtime trip state, and a documented public demo boundary."
       >
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <FeatureCard
@@ -98,25 +99,50 @@ export default function HomePage() {
           />
           <FeatureCard
             icon="✓"
-            title="Phone-verified, OTP-secured"
-            description="Every rider authenticates with a real OTP via MSG91 — no anonymous accounts, no shared logins."
+            title="MSG91 OTP flow"
+            description="Production OTP uses the MSG91 Flutter widget and backend access-token verification. Local development keeps a gated dev fallback."
           />
           <FeatureCard
             icon="◷"
-            title="Live tracking + SOS"
-            description="Watch your cab in real time. One-tap SOS pings emergency contacts and our 24/7 support team."
+            title="Payments and ad unlocks"
+            description="Riders unlock serious matches through rewarded ads or a Razorpay payment path, with safe test/stub modes for public demos."
           />
           <FeatureCard
             icon="★"
-            title="Two-way ratings"
-            description="Riders rate drivers, drivers rate riders, co-riders rate each other. Below-threshold accounts lose access."
+            title="India-first locale"
+            description="The apps resolve supported Indian languages for platform UI and place results instead of assuming English-only usage."
           />
+        </div>
+      </Section>
+
+      <Section
+        alt
+        eyebrow="Public release"
+        title="Source-available, with production boundaries."
+        intro="The public repository is designed to be useful for learning and review without exposing provider credentials, live driver operations, KYC details, fraud controls, or safety playbooks."
+      >
+        <div className="grid lg:grid-cols-3 gap-5">
+          <BoundaryCard
+            title="Public-functional"
+            body="Rider trip planning, destination matching, pricing, ad-watch unlock, payment test/stub flows, and backend state transitions."
+          />
+          <BoundaryCard
+            title="Public-limited"
+            body="Driver app source, onboarding UI, subscription surfaces, dispatch screens, and simulated/demo driver flows."
+          />
+          <BoundaryCard
+            title="Private-gated"
+            body="Real driver fleet operations, production dispatch, provider credentials, KYC, fraud rules, and sensitive safety operations."
+          />
+        </div>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <Link href="/technology" className="btn-primary">Read the technical overview</Link>
+          <Link href="/about" className="btn-secondary">Why we built it this way</Link>
         </div>
       </Section>
 
       {/* CTA */}
       <Section
-        alt
         eyebrow="Get started"
         title="Your next short ride could cost less."
         intro="Download the app, set your destination, and let us find someone heading the same way."
@@ -132,6 +158,15 @@ export default function HomePage() {
         </div>
       </Section>
     </>
+  );
+}
+
+function BoundaryCard({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-2xl bg-white border border-ink-300/40 p-6">
+      <h3 className="text-lg font-semibold">{title}</h3>
+      <p className="mt-2 text-sm muted leading-relaxed">{body}</p>
+    </div>
   );
 }
 

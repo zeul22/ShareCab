@@ -22,8 +22,9 @@ export default function DriversPage() {
               Keep <span className="text-brand-600">100%</span> of every fare.
             </h1>
             <p className="mt-6 text-lg muted max-w-xl">
-              ShareCab takes zero commission. Pay a flat ₹199/month subscription instead — and
-              the first month is free.
+              ShareCab is designed around zero per-ride commission and a flat subscription
+              model. The public source release shows the driver flow, while real production
+              driver operations remain gated.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href="/contact" className="btn-primary">Sign up as a driver</Link>
@@ -77,7 +78,7 @@ export default function DriversPage() {
       <Section
         eyebrow="Why drivers stay"
         title="A simpler, fairer deal."
-        intro="Most platforms take 20–30% per ride. We take a fixed monthly fee and stop bleeding you on every trip. Here's what else changes."
+        intro="Most platforms take a percentage from every ride. ShareCab's model keeps the driver economics predictable: flat subscription, OTP pickup verification, clear dispatch state, and no hidden per-ride cut."
       >
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <FeatureCard
@@ -115,8 +116,29 @@ export default function DriversPage() {
 
       {/* Economics */}
       <Section
-        id="economics"
         alt
+        eyebrow="Public release boundary"
+        title="Driver source is visible; live driver ops are protected."
+        intro="The driver app is part of the public source release for review, UI work, and local demo testing. Connecting real drivers, production dispatch, KYC, fleet quality controls, and safety operations requires private production configuration."
+      >
+        <div className="grid sm:grid-cols-3 gap-5">
+          <Need title="Visible in public">
+            Driver login, onboarding screens, subscription surfaces, dispatch UI, active trip
+            route, location push code, and pickup OTP flow.
+          </Need>
+          <Need title="Demo only by default">
+            Public builds can use simulated drivers and rider-side demos. Backend demo mode blocks
+            production driver dispatch unless explicitly enabled.
+          </Need>
+          <Need title="Private in production">
+            KYC providers, app signing, live dispatch, real driver supply, provider secrets, and
+            sensitive safety operations.
+          </Need>
+        </div>
+      </Section>
+
+      <Section
+        id="economics"
         eyebrow="The math"
         title="Why this works for both sides."
         intro="At ~30 rides/day at an average ₹200 fare, here's roughly what each model leaves you with at the end of the month."

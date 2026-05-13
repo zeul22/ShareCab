@@ -35,7 +35,7 @@ export function MobileNav({ links }: { links: Link[] }) {
   const isOpen = open && mounted;
   const drawer = (
     <div
-      className={`md:hidden fixed inset-0 z-40 transition-opacity duration-300 ease-out ${
+      className={`lg:hidden fixed inset-0 z-40 transition-opacity duration-300 ease-out ${
         isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
       }`}
       onClick={() => setOpen(false)}
@@ -126,7 +126,7 @@ export function MobileNav({ links }: { links: Link[] }) {
         aria-label={open ? 'Close menu' : 'Open menu'}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="md:hidden inline-flex h-10 w-10 items-center justify-center rounded-lg text-ink-700 hover:bg-brand-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 relative z-50"
+        className="lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-lg text-ink-700 hover:bg-brand-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 relative z-50"
       >
         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
           {open ? (

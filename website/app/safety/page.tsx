@@ -9,8 +9,9 @@ export default function SafetyPage() {
       <section className="container-page pt-20 pb-6">
         <h1 className="h-display max-w-3xl">Safety, built into every ride.</h1>
         <p className="mt-6 text-lg muted max-w-2xl">
-          Sharing your ride doesn&rsquo;t mean compromising on safety. Every ShareCab trip ships with
-          verification, tracking, and accountability — for both you and your co-rider.
+          Sharing your ride should not mean losing control. ShareCab combines OTP,
+          ratings, live trip state, driver verification goals, private chat, and public/private
+          release boundaries so sensitive safety operations do not become public playbooks.
         </p>
       </section>
 
@@ -59,7 +60,30 @@ export default function SafetyPage() {
         eyebrow="Privacy"
         title="Your details stay yours."
         intro="Co-riders see only your first name and rating — never your phone number, address, or last name. The in-app chat is wiped automatically when the group composition changes (someone joins or leaves), so no leftover messages from a stranger."
-      />
+      >
+        <div className="grid sm:grid-cols-3 gap-5">
+          <SafetyNote title="Public source">
+            General safety UX, OTP flows, ratings, and trip-state logic can be reviewed publicly.
+          </SafetyNote>
+          <SafetyNote title="Private ops">
+            Escalation contacts, fraud thresholds, incident playbooks, and production safety
+            operations stay private.
+          </SafetyNote>
+          <SafetyNote title="No real user data">
+            The public repository must not include rider, driver, trip, GPS, payment, complaint,
+            or KYC data.
+          </SafetyNote>
+        </div>
+      </Section>
     </>
+  );
+}
+
+function SafetyNote({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl bg-white border border-ink-300/40 p-6">
+      <h3 className="text-lg font-semibold">{title}</h3>
+      <p className="mt-2 text-sm muted leading-relaxed">{children}</p>
+    </div>
   );
 }
