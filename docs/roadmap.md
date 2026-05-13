@@ -160,7 +160,7 @@ Phases 5, 6, 7 are independent and can run in parallel by different people. Ever
 
 **Scope:**
 
-1. `LICENSE.md` at repo root — source-available under PolyForm Noncommercial 1.0.0, because the official ShareCab apps and services remain commercial product surfaces.
+1. `LICENSE.md` at repo root — source-available under PolyForm Shield 1.0.0, because the official ShareCab apps and services remain protected product surfaces.
 2. `CONTRIBUTING.md` at repo root — covers fork/clone setup (link to `docs/getting-started.md`), commit style, PR review expectations, test requirements.
 3. `CODE_OF_CONDUCT.md` at repo root — Contributor Covenant 2.1 (industry standard, no need to invent).
 4. `SECURITY.md` at repo root — how to report a vulnerability privately (a single email address) + disclosure window expectations + "what we won't pay for" (DoS, theoretical issues, etc.).
@@ -418,7 +418,7 @@ The matching engine ([`backend/src/services/matchingService.js`](../backend/src/
 
 These are not blockers but the team should answer them before they bite. None of them stop Phase 1 from shipping.
 
-1. **License review**: source-available terms are now drafted around PolyForm Noncommercial 1.0.0. Have counsel review before the repository becomes public.
+1. **License review**: source-available terms are now drafted around PolyForm Shield 1.0.0. Have counsel review before the repository becomes public.
 2. **Public mirror vs single repo** for Phase 9 — settle before going public.
 3. **Police verification flow** is referenced in the prompt but the mechanism varies state to state. Recommendation: stub it as a manual admin action (upload a clearance certificate, admin marks `documents.police.status='VERIFIED'`) until volume justifies automation.
 4. **Geographic scope** — the brief says "yellow-plate" which is India-specific. If we ever cross borders we'll need a per-country eligibility rule. Punt for now.

@@ -58,11 +58,11 @@
         </activity>
 
         <!-- Google Maps Platform API key — required by google_maps_flutter
-             on Android. Replace with a Cloud-Console-restricted Android
-             key (package id + SHA-1 fingerprint) before submission. -->
+             on Android. build.gradle.kts reads this from
+             dart-define GOOGLE_MAPS_KEY, so no key is committed. -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk"/>
+            android:value="${googleMapsApiKey}"/>
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

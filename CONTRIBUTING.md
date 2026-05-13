@@ -16,9 +16,9 @@ By opening a pull request, issue, discussion, patch, or other contribution, you
 agree that your contribution is provided under the terms in
 [CONTRIBUTOR_LICENSE_TERMS.md](./CONTRIBUTOR_LICENSE_TERMS.md).
 
-This is important because ShareCab is source-available for noncommercial public
-use, while the ShareCab maintainers may also operate official commercial apps
-and services.
+This is important because ShareCab is source-available for public review and
+non-competing use, while the ShareCab maintainers may also operate official
+commercial apps and services.
 
 ## What to Work On
 
@@ -77,4 +77,3 @@ Maintainers may request tests, docs, security clarification, or a smaller scope
 before merging. Changes that affect production operations, rider safety,
 driver eligibility, payments, authentication, or data privacy require stricter
 review.
-

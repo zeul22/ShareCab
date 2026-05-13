@@ -129,6 +129,7 @@ class ApiConfig {
     'ADMOB_REWARDED_AD_UNIT_IOS',
     defaultValue: 'ca-app-pub-3940256099942544/1712485313',
   );
+
   /// Picks the right test/prod ad unit for the running platform. The
   /// AdService consumes this when loading a rewarded ad.
   static String admobRewardedAdUnit({required bool isIos}) =>
@@ -138,14 +139,11 @@ class ApiConfig {
   // Native map rendering uses the keys configured in the Android/iOS native
   // projects (AndroidManifest.xml + ios/Runner/Info.plist).
   //
-  // The default is the same demo key we ship in the native configs. It's
-  // restricted in Google Cloud Console (Android pkg + SHA-1 / iOS bundle ID),
-  // safe to commit, and lets `flutter run` work without --dart-define.
-  // Override per-environment with:
+  // No key is committed to the public repo. Provide a restricted key per
+  // environment with:
   //   flutter run --dart-define=GOOGLE_MAPS_KEY=AIza...
-  // Rotate before going to production; see .vscode/launch.json.
   static const String googleMapsKey = String.fromEnvironment(
     'GOOGLE_MAPS_KEY',
-    defaultValue: 'AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk',
+    defaultValue: '',
   );
 }

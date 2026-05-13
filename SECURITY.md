@@ -3,11 +3,10 @@
 Do not report security vulnerabilities in public issues, pull requests, or
 discussions.
 
-Before public launch, maintainers must replace this placeholder with a monitored
-security contact address and enable GitHub private vulnerability reporting if
-available.
+Enable GitHub private vulnerability reporting when the repository becomes public
+if the hosting plan supports it.
 
-Security contact: security@sharecab.example
+Security contact: anandrahul044@gmail.com
 
 ## Supported Scope
 
@@ -56,4 +55,3 @@ disclosure before maintainers can respond.
 Maintainers aim to acknowledge valid reports within 3 business days and provide
 a remediation plan or status update within 14 days. Critical issues may be
 handled faster and may require temporary private coordination.
-

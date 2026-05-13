@@ -34,7 +34,7 @@ flutter create . --org com.sharecab
 # 2. Install dependencies
 flutter pub get
 
-# 3. Run with the API URL and your Google Maps key
+# 3. Run with the API URL and your restricted Google Maps key
 flutter run \
   --dart-define=API_BASE_URL=http://10.0.2.2:4000 \
   --dart-define=GOOGLE_MAPS_KEY=AIzaSy...your-key
@@ -61,7 +61,10 @@ The repo's [`.vscode/launch.json`](../.vscode/launch.json) ships four launch con
 
 The first three are perfect for the mock demo (the picker just won't show map tiles without a key). Pick the fourth when you actually need maps.
 
-To bake your key in permanently, edit `.vscode/launch.json` and uncomment the `toolArgs` lines on the config you use most.
+Do not commit a Google Maps key. Android receives `GOOGLE_MAPS_KEY` from the
+Flutter dart-define at build time. On iOS, set `GOOGLE_MAPS_KEY` as a local
+Xcode build setting or in an untracked local xcconfig before running map
+screens.
 
 ## Booking Flow
 
@@ -224,14 +227,13 @@ Inside `<manifest>`:
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 ```
 
-### 2. iOS — `ios/Runner/AppDelegate.swift`
+### 2. iOS — `ios/Runner/Info.plist`
 
-```swift
-import GoogleMaps
-GMSServices.provideAPIKey("YOUR_API_KEY_HERE")
-```
+Set `GOOGLE_MAPS_KEY` as a local Xcode build setting or in an untracked local
+xcconfig. `Info.plist` reads that value through `$(GOOGLE_MAPS_KEY)`, and
+`AppDelegate.swift` registers it only when it is present.
 
-Add to `ios/Runner/Info.plist`:
+The location usage strings live in `ios/Runner/Info.plist`:
 ```xml
 <key>NSLocationWhenInUseUsageDescription</key>
 <string>ShareCab uses your location to find nearby rides and drivers.</string>

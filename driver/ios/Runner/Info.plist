@@ -46,7 +46,7 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>GMSApiKey</key>
-	<string>AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk</string>
+	<string>$(GOOGLE_MAPS_KEY)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>ShareCab Driver uses your location to share live position with riders, navigate to pickups, and detect when you've reached each stop. We only access location while the app is open.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

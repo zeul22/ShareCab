@@ -13,7 +13,8 @@ import UIKit
     // Info.plist (or override via build settings) and you're done.
     if let key = Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String,
        !key.isEmpty,
-       key != "YOUR_GOOGLE_MAPS_KEY_HERE" {
+       key != "YOUR_GOOGLE_MAPS_KEY_HERE",
+       !key.contains("$(") {
       GMSServices.provideAPIKey(key)
     } else {
       NSLog("[ShareCab] Google Maps key missing — set GMSApiKey in Info.plist to enable map tiles.")

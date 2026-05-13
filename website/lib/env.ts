@@ -14,11 +14,11 @@ export const env = {
   appStoreUrl: process.env.NEXT_PUBLIC_APP_STORE_URL ?? '',
   playStoreUrl: process.env.NEXT_PUBLIC_PLAY_STORE_URL ?? '',
 
-  supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? 'support@sharecab.example',
+  supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? 'anandrahul044@gmail.com',
   driverSupportEmail:
-    process.env.NEXT_PUBLIC_DRIVER_SUPPORT_EMAIL ?? 'drivers@sharecab.example',
+    process.env.NEXT_PUBLIC_DRIVER_SUPPORT_EMAIL ?? 'anandrahul044@gmail.com',
   partnershipsEmail:
-    process.env.NEXT_PUBLIC_PARTNERSHIPS_EMAIL ?? 'hello@sharecab.example',
+    process.env.NEXT_PUBLIC_PARTNERSHIPS_EMAIL ?? 'anandrahul044@gmail.com',
 
   contactFormEndpoint: process.env.NEXT_PUBLIC_CONTACT_FORM_ENDPOINT ?? '',
 

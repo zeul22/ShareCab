@@ -41,7 +41,7 @@ class HelpSafetyScreen extends StatelessWidget {
             _Item(
               icon: Icons.email_outlined,
               title: 'Email support',
-              subtitle: 'support@sharecab.example',
+              subtitle: 'anandrahul044@gmail.com',
             ),
             _Item(
               icon: Icons.phone_outlined,
@@ -106,7 +106,8 @@ class _Item extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  const _Item({required this.icon, required this.title, required this.subtitle});
+  const _Item(
+      {required this.icon, required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
@@ -125,9 +126,12 @@ class _Item extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(title,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
-                Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 13)),
+                Text(subtitle,
+                    style:
+                        const TextStyle(color: Colors.black54, fontSize: 13)),
               ],
             ),
           ),

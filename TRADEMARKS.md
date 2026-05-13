@@ -33,6 +33,5 @@ private development environment.
 
 ## Questions
 
-Before public launch, replace this placeholder with a monitored brand contact:
-brand@sharecab.example
 
+Brand questions can be sent to: anandrahul044@gmail.com
