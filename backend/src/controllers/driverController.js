@@ -27,6 +27,13 @@ async function setOnline(req, res, next) {
   try {
     const driver = await loadDriverForRequest(req);
 
+    if (!env.dispatch.driverOpsEnabled) {
+      throw new HttpError(
+        403,
+        'Driver operations are disabled in public demo mode.',
+      );
+    }
+
     // Verification gate. Drivers must clear ops review before they can
     // accept dispatches — this is the first thing the driver app checks
     // and the same gate is enforced server-side so a malicious client

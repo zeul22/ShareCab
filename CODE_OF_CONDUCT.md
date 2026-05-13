@@ -25,10 +25,7 @@ maintainer interactions connected to the project.
 
 ## Reporting
 
-Before public launch, maintainers must replace this placeholder with a monitored
-conduct contact address.
-
-Reports can be sent to: conduct@sharecab.example
+Reports can be sent to: anandrahul044@gmail.com
 
 Include:
 
@@ -54,4 +51,3 @@ including:
 
 This policy is inspired by common open-source community conduct practices,
 including the Contributor Covenant, but is written specifically for ShareCab.
-

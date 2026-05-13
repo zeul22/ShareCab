@@ -1,8 +1,28 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+fun dartDefine(name: String): String {
+    val directValue = providers.gradleProperty(name).orNull
+    if (!directValue.isNullOrBlank()) return directValue
+
+    val encodedDefines = providers.gradleProperty("dart-defines").orNull
+        ?: return ""
+    return encodedDefines
+        .split(",")
+        .mapNotNull { encoded ->
+            runCatching {
+                String(Base64.getDecoder().decode(encoded))
+            }.getOrNull()
+        }
+        .firstOrNull { decoded -> decoded.startsWith("$name=") }
+        ?.substringAfter("=")
+        ?: ""
 }
 
 android {
@@ -48,6 +68,7 @@ android {
         // method refs. Cheap to enable; expensive to debug if you hit the
         // ceiling without it later.
         multiDexEnabled = true
+        manifestPlaceholders["googleMapsApiKey"] = dartDefine("GOOGLE_MAPS_KEY")
     }
 
     buildTypes {

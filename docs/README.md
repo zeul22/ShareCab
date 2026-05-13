@@ -7,7 +7,8 @@ Cross-cutting docs for the ShareCab monorepo. Per-service deep dives live alongs
 ### Start here
 - [Architecture](architecture.md) — what the four services are, how they fit together, where state lives.
 - [Getting Started](getting-started.md) — clone, install, and run everything locally in 15 minutes.
-- [Roadmap](roadmap.md) — phased plan for open-sourcing the codebase + the KYC, safety, and admin work that has to land before public release.
+- [Roadmap](roadmap.md) — phased plan for source-available release + the KYC, safety, and admin work that has to land before public release.
+- [Public release plan](PUBLIC_RELEASE_PLAN.md) — what is public-functional, public-stubbed, and private-only.
 
 ### Building & shipping
 - [Deployment](deployment.md) — GCP Cloud Run + MongoDB Atlas; the production target.
@@ -20,6 +21,7 @@ Cross-cutting docs for the ShareCab monorepo. Per-service deep dives live alongs
 - [Pricing](pricing.md) — vehicle classes, surge, distance bands, GST, shared-fare allocation.
 - [Revenue model](revenue.md) — rider ad/payment unlock + driver subscription.
 - [Driver verification](driver-verification.md) — onboarding, KYC strategy, verification states.
+- [Source availability boundary](OPEN_SOURCE.md) — license model and public/private repository rules.
 
 ### Non-technical
 - [Product overview](product.md) — what ShareCab is, market scope, pricing.

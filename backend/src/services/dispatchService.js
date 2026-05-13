@@ -233,6 +233,11 @@ function _cancelOfferTimer(tripId) {
 }
 
 async function findNearestAvailableDriver(nearPoint, { skipDriverIds = [] } = {}) {
+  if (!env.dispatch.driverOpsEnabled) {
+    logger.info('[dispatch] driver operations disabled; skipping driver lookup');
+    return null;
+  }
+
   const skip = (skipDriverIds || []).map((id) =>
     typeof id === 'string' ? id : id.toString(),
   );

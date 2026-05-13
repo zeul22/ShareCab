@@ -24,14 +24,12 @@ Follow [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 ## Product or Operations Support
 
-Before public launch, replace these placeholders with monitored production
-support channels:
+Current project contact:
 
-- Product support: support@sharecab.example
-- Security: security@sharecab.example
-- Conduct: conduct@sharecab.example
+- Product support: anandrahul044@gmail.com
+- Security: anandrahul044@gmail.com
+- Conduct: anandrahul044@gmail.com
 
 For live ride emergencies, users should use the emergency features inside the
 official ShareCab app and local emergency services. GitHub is not monitored for
 urgent ride support.
-

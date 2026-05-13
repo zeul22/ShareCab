@@ -91,12 +91,11 @@ class ApiConfig {
   // API (decoded polyline along the trip stops). Native map rendering uses
   // the keys configured in the Android/iOS native projects.
   //
-  // Default is the same demo key the rider app ships. Restricted in Google
-  // Cloud Console (Android pkg + SHA-1 / iOS bundle ID), safe to commit.
-  // Override per-environment with:
+  // No key is committed to the public repo. Provide a restricted key per
+  // environment with:
   //   flutter run --dart-define=GOOGLE_MAPS_KEY=AIza...
   static const String googleMapsKey = String.fromEnvironment(
     'GOOGLE_MAPS_KEY',
-    defaultValue: '***REMOVED_GOOGLE_MAPS_KEY***',
+    defaultValue: '',
   );
 }

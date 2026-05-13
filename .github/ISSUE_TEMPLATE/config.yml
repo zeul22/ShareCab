@@ -1,9 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/
-    about: Do not open public security issues. Follow SECURITY.md.
+    url: mailto:anandrahul044@gmail.com?subject=ShareCab%20security%20report
+    about: Do not open public security issues. Email a private report instead.
   - name: Product support
-    url: https://github.com/
+    url: mailto:anandrahul044@gmail.com?subject=ShareCab%20support
     about: GitHub is for development reports, not live ride support.
-

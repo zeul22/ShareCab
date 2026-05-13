@@ -6,6 +6,7 @@ function num(value, fallback) {
 const env = {
   port: num(process.env.PORT, 4000),
   nodeEnv: process.env.NODE_ENV || 'development',
+  publicDemo: (process.env.SHARECAB_PUBLIC_DEMO || '').toLowerCase() === 'true',
 
   // Defaults to the Mongo service from the repo's docker-compose.yml so a fresh
   // `npm run dev` works after `docker compose up -d`. Override via env for
@@ -196,6 +197,12 @@ const env = {
   // Driver dispatch (the Uber-style offer flow)
   // =============================================================================
   dispatch: {
+    // Public-source demo mode should exercise rider-side matching,
+    // pricing, unlocks, and trip state without connecting real drivers
+    // to real dispatch. Private deployments can opt back in explicitly.
+    driverOpsEnabled:
+      (process.env.SHARECAB_PUBLIC_DEMO || '').toLowerCase() !== 'true' ||
+      (process.env.ENABLE_PRODUCTION_DRIVER_OPS || '').toLowerCase() === 'true',
     // How long a driver has to accept/reject an offered trip before we
     // auto-reject and re-dispatch. 30s gives a driver who's mid-task
     // (eating, refueling, glancing at the phone) realistic time to react;
