@@ -247,4 +247,4 @@ Color palette and typography live in [`lib/theme/app_theme.dart`](lib/theme/app_
 
 ## License
 
-MIT
+Source-available under the repository license. See [`../LICENSE.md`](../LICENSE.md).

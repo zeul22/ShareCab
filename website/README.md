@@ -71,4 +71,4 @@ The marketing site is largely static. If/when you wire interactive forms (e.g. w
 
 ## License
 
-MIT
+Source-available under the repository license. See [`../LICENSE.md`](../LICENSE.md).
