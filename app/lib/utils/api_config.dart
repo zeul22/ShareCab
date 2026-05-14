@@ -56,22 +56,35 @@ class ApiConfig {
       msg91WidgetId.isNotEmpty && msg91TokenAuth.isNotEmpty;
 
   static Future<void> loadRuntimeMsg91Config({http.Client? client}) async {
+    // Skip when we've already confirmed the state from the backend.
+    // `_runtimeMsg91ConfigLoaded` is set ONLY on a confirmed response
+    // (enabled:true that populated creds, or enabled:false), never on
+    // a transient network error. So a previous failure doesn't block a
+    // retry when the rider taps Send.
     if (msg91Enabled || _runtimeMsg91ConfigLoaded) return;
-    _runtimeMsg91ConfigLoaded = true;
 
     final c = client ?? http.Client();
     try {
       final res = await c.get(Uri.parse('$apiRoot/auth/otp/msg91/config'));
       if (res.statusCode < 200 || res.statusCode >= 300 || res.body.isEmpty) {
+        // Transient failure — don't latch _runtimeMsg91ConfigLoaded, so
+        // the next OTP request retries.
         return;
       }
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      if (body['enabled'] != true) return;
+      if (body['enabled'] != true) {
+        // Backend confirmed MSG91 is off (dev fallback or missing
+        // creds). Latch the flag so we don't hammer the endpoint on
+        // every keystroke.
+        _runtimeMsg91ConfigLoaded = true;
+        return;
+      }
       final widgetId = body['widgetId'];
       final authToken = body['authToken'] ?? body['tokenAuth'];
       if (widgetId is String && authToken is String) {
         _runtimeMsg91WidgetId = widgetId;
         _runtimeMsg91AuthToken = authToken;
+        _runtimeMsg91ConfigLoaded = true;
       }
     } catch (e) {
       debugPrint('[auth] MSG91 runtime config fetch failed: $e');

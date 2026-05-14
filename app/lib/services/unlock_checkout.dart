@@ -34,10 +34,6 @@ class UnlockCheckoutFailed extends UnlockCheckoutResult {
 /// Wraps the Razorpay checkout sheet + the backend `/unlocks/order` and
 /// `/unlocks/payment-confirm` calls for the rider unlock pay path.
 ///
-/// Mirrors [SubscriptionCheckout] in shape — the two share the same
-/// two-step Razorpay flow with different `notes.kind` tagging. Kept
-/// separate to avoid coupling the unlock UX to driver concerns.
-///
 /// One instance per attempt — call [dispose] when done so the underlying
 /// Razorpay plugin clears its native listeners.
 class UnlockCheckout {

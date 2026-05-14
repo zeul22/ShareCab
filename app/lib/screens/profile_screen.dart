@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../routes.dart';
 import '../services/auth_service.dart';
+import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -79,6 +80,22 @@ class ProfileScreen extends StatelessWidget {
               title: 'Log out',
               destructive: true,
               onTap: () async {
+                final flow = context.read<RideFlowState>();
+                // Explicit logout is rare in a logged-in-forever app —
+                // when it does happen, treat any in-flight trip as
+                // abandoned and cancel it server-side. Otherwise the
+                // backend keeps a `requested` / `confirmed` trip alive
+                // for the matching engine to hand to the now-departed
+                // rider, and the co-rider sees a ghost in their group.
+                //
+                // cancelActiveRide is best-effort (it swallows network
+                // errors) so logout doesn't hang on a flaky link.
+                await flow.cancelActiveRide();
+                // Belt + suspenders: cancelActiveRide doesn't reset
+                // session id / search state, so do the full local wipe
+                // before we sign the token out.
+                flow.clearAfterClose();
+                if (!context.mounted) return;
                 await context.read<AuthService>().logout();
                 if (!context.mounted) return;
                 Navigator.of(context).pushNamedAndRemoveUntil(Routes.phoneEntry, (_) => false);

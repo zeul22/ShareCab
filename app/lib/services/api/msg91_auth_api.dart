@@ -100,6 +100,25 @@ class Msg91AuthApi implements AuthApi {
         'Raw response: ${jsonEncode(res ?? {})}',
       );
     }
+    // Token shape preview + JWT-shape sanity check. A real MSG91 JWT
+    // is 100+ chars in three dot-separated parts. Anything dramatically
+    // shorter, or missing dots, means `_extractAccessToken` picked up
+    // the wrong field — a "msg91 code 418" rejection from the backend
+    // is the same root cause in that case.
+    if (kDebugMode) {
+      final preview = accessToken.length > 16
+          ? '${accessToken.substring(0, 8)}…${accessToken.substring(accessToken.length - 4)} (len=${accessToken.length})'
+          : accessToken;
+      final looksLikeJwt = accessToken.split('.').length == 3 &&
+          accessToken.length >= 100;
+      debugPrint(
+        '═══════════ [msg91] verifyOTP DIAGNOSTIC ═══════════\n'
+        'extracted accessToken preview: $preview\n'
+        'looks like a JWT? $looksLikeJwt\n'
+        'raw SDK response: ${jsonEncode(res ?? {})}\n'
+        '════════════════════════════════════════════════════',
+      );
+    }
     // Backend re-validates the token via MSG91's verifyAccessToken and
     // issues our own session. Use the original `+91…` form for the
     // phone so the User document in Mongo stays consistent with the

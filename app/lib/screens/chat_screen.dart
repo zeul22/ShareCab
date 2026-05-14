@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/chat_message.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
+import '../services/chat_unread_service.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
 
@@ -30,6 +33,13 @@ class _ChatScreenState extends State<ChatScreen> {
   late final ChatService _chat;
   late final TextEditingController _input;
   late final ScrollController _scroll;
+  // Captured at didChangeDependencies time so dispose() can call
+  // markChatClosed without going through context.read — at dispose
+  // time the InheritedWidget lookup is unreliable (the previous code
+  // ate the exception in a try/catch, so _openGroupId stayed pinned
+  // to this group forever and every subsequent chat:message got
+  // suppressed → no badge bump after the rider backed out of chat).
+  ChatUnreadService? _unread;
 
   @override
   void initState() {
@@ -43,15 +53,42 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     _chat.addListener(_onChatChanged);
     _chat.connect();
+    _input.addListener(_onInputChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = context.read<ChatUnreadService>();
+    if (!identical(_unread, next)) {
+      _unread = next;
+      // Tell the badge service we're actively reading this group's
+      // chat, so incoming messages here don't bump the badge count.
+      // Done here (not in initState) so the Provider lookup happens
+      // after the widget is fully wired into the InheritedWidget tree.
+      _unread!.markChatOpened(widget.groupId);
+    }
   }
 
   @override
   void dispose() {
+    // Use the captured reference — context.read at this point can
+    // throw or return stale state.
+    _unread?.markChatClosed(widget.groupId);
+    _input.removeListener(_onInputChanged);
     _chat.removeListener(_onChatChanged);
     _chat.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _onInputChanged() {
+    if (_input.text.isEmpty) {
+      _chat.stopLocalTyping();
+    } else {
+      _chat.noteLocalTyping();
+    }
   }
 
   /// Auto-scroll to the newest message on every state change. We delay one
@@ -89,6 +126,8 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     }
 
+    final typing = _chat.typingUsers;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Co-rider chat'),
@@ -125,6 +164,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                     ),
             ),
+            if (typing.isNotEmpty) _TypingPip(users: typing),
             if (_chat.error != null)
               Container(
                 width: double.infinity,
@@ -168,6 +208,115 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: const Padding(
                     padding: EdgeInsets.all(12),
                     child: Icon(Icons.send, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Asha is typing" — left-aligned bubble that mirrors the look of an
+/// incoming message, with three animated dots pulsing in sequence so it
+/// reads at a glance. Anchored just above the text input.
+class _TypingPip extends StatefulWidget {
+  final List<TypingUser> users;
+  const _TypingPip({required this.users});
+
+  @override
+  State<_TypingPip> createState() => _TypingPipState();
+}
+
+class _TypingPipState extends State<_TypingPip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final names = widget.users.map((u) => u.name).toList();
+    final label = names.length == 1
+        ? '${names.first} is typing'
+        : '${names.join(', ')} are typing';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.78,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 10, bottom: 2),
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: Colors.black54,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF1F3F4),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
+                    bottomLeft: Radius.circular(4),
+                    bottomRight: Radius.circular(16),
+                  ),
+                ),
+                child: AnimatedBuilder(
+                  animation: _c,
+                  builder: (_, __) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: List.generate(3, (i) {
+                      // Each dot leads the next by 1/3 of the cycle.
+                      // sin(2π * (t + i/3)) maps to [-1, 1]; lift to
+                      // [0.4, 1.0] so dots never fully fade out — keeps
+                      // the bubble readable while still pulsing.
+                      const twoPi = 6.283185307179586;
+                      final phase = (_c.value + i / 3) % 1.0;
+                      final s = (1 + math.sin(twoPi * phase)) / 2; // 0..1
+                      final opacity = 0.4 + 0.6 * s;
+                      return Padding(
+                        padding: EdgeInsets.only(left: i == 0 ? 0 : 4),
+                        child: Opacity(
+                          opacity: opacity,
+                          child: Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
                   ),
                 ),
               ),

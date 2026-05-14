@@ -104,8 +104,18 @@ class _RideFlowBannerState extends State<RideFlowBanner> {
     // (text input / "close ride" CTA). The floating banner sits on
     // top of those and covers them — suppress it on those routes
     // regardless of which banner would have fired.
+    //
+    // Auth gate (splash / phone-entry / OTP) suppresses the banner
+    // unconditionally — if a forced logout (refresh-token expiry)
+    // bounces the user here while RideFlowState still has stale
+    // active-ride data, we don't want a "Ride in progress" banner
+    // floating over the login screen.
     if (currentRoute == Routes.chat ||
-        currentRoute == Routes.riderCoordination) {
+        currentRoute == Routes.riderCoordination ||
+        currentRoute == Routes.splash ||
+        currentRoute == Routes.phoneEntry ||
+        currentRoute == Routes.otpVerify ||
+        currentRoute == Routes.onboarding) {
       return null;
     }
 
@@ -171,11 +181,18 @@ class _RideFlowBannerState extends State<RideFlowBanner> {
           currentRoute == Routes.rating) {
         return null;
       }
-      return const _BannerSpec(
+      // Pre-dispatch (no driver yet) → take the rider back to the
+      // coordination screen which hosts both "Open chat" and "Find a
+      // cab". Once a driver is assigned, route to RideConfirmation
+      // (driver tracking / OTP). Same condition match_result_screen
+      // uses to pick the initial post-accept destination.
+      final preDispatch = flow.activeRide!.driver.id.isEmpty;
+      return _BannerSpec(
         kind: _BannerKind.matchFound,
         title: 'Ride in progress',
         subtitle: 'Tap to view your ride',
-        targetRoute: Routes.rideConfirmation,
+        targetRoute:
+            preDispatch ? Routes.riderCoordination : Routes.rideConfirmation,
         progress: 1.0,
       );
     }

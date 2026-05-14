@@ -8,6 +8,7 @@ import '../routes.dart';
 import '../services/api/ride_api.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
+import '../widgets/chat_button_badge.dart';
 import '../widgets/fare_breakdown_card.dart';
 
 /// Driver + car + OTP screen. The OTP is shown only after the user reaches
@@ -216,12 +217,15 @@ class _RideConfirmationScreenState extends State<RideConfirmationScreen> {
         ),
         actions: [
           if (hasCoRider && groupId != null)
-            IconButton(
-              tooltip: 'Chat with co-rider',
-              icon: const Icon(Icons.chat_bubble_outline),
-              onPressed: () => Navigator.of(context).pushNamed(
-                Routes.chat,
-                arguments: groupId,
+            ChatButtonBadge(
+              groupId: groupId,
+              child: IconButton(
+                tooltip: 'Chat with co-rider',
+                icon: const Icon(Icons.chat_bubble_outline),
+                onPressed: () => Navigator.of(context).pushNamed(
+                  Routes.chat,
+                  arguments: groupId,
+                ),
               ),
             ),
         ],

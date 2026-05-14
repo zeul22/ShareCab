@@ -41,8 +41,16 @@ class AuthSession {
           'role': user.role,
           'rating': user.rating,
           'totalRides': user.totalRides,
+          'profileCompleted': user.profileCompleted,
         },
       };
+
+  AuthSession copyWith({AppUser? user}) => AuthSession(
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        accessExpiresAt: accessExpiresAt,
+        user: user ?? this.user,
+      );
 
   factory AuthSession.fromJson(Map<String, dynamic> json) => AuthSession(
         accessToken: json['accessToken'] as String,

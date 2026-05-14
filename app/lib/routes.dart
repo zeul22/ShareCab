@@ -1,21 +1,23 @@
 /// Centralized route names. Imported by `main.dart` and any caller of
 /// `Navigator.pushNamed` so renames stay in one place.
+///
+/// This binary is the *rider* surface — it hosts the booking flow,
+/// matching, chat, and live-ride screens. Driver-only surfaces (online/
+/// offline, dispatch, accepting offers, trip lifecycle) live in the
+/// separate /driver app. A driver-role user signing in here is fine
+/// though: they get the rider experience and can book a cab for
+/// themselves like anyone else.
 class Routes {
   const Routes._();
-
-  /// Single source of truth for "where does this user belong post-auth".
-  /// Used by the splash + OTP-verify screens so we can't accidentally land
-  /// a driver on the rider home (or vice-versa) from one of them.
-  static String homeForRole(String? role) =>
-      role == 'driver' ? driverHome : home;
 
   static const splash = '/';
   static const phoneEntry = '/auth/phone';
   static const otpVerify = '/auth/otp';
+  // First-time rider onboarding — name + email. Routed to from splash
+  // + OTP-verify when AuthService.user.profileCompleted is false.
+  static const onboarding = '/onboarding';
 
   static const home = '/home';
-  static const driverHome = '/driver/home';
-  static const driverActiveTrip = '/driver/active';
   static const profile = '/profile';
   static const helpSafety = '/help';
 

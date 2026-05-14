@@ -509,6 +509,7 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = JZVW649NG3;
 				ENABLE_BITCODE = NO;
+				GOOGLE_MAPS_KEY = "AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk";
 				INFOPLIST_FILE = Runner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ShareCab;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
@@ -695,6 +696,7 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = JZVW649NG3;
 				ENABLE_BITCODE = NO;
+				GOOGLE_MAPS_KEY = "AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk";
 				INFOPLIST_FILE = Runner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ShareCab;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
@@ -721,6 +723,7 @@
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = JZVW649NG3;
 				ENABLE_BITCODE = NO;
+				GOOGLE_MAPS_KEY = "AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk";
 				INFOPLIST_FILE = Runner/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ShareCab;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";

@@ -327,11 +327,21 @@ class _ActiveTripCard extends StatelessWidget {
             targetRoute: Routes.payment,
           );
         default:
-          return const _ActiveTripSpec(
-            icon: Icons.check_circle,
-            title: 'Ride confirmed',
-            subtitle: 'Tap to view OTP, driver & cancel option',
-            targetRoute: Routes.rideConfirmation,
+          // Pre-dispatch (no driver yet) → take the rider back to the
+          // coordination screen with both Open chat + Find a cab. Once
+          // a driver is assigned, RideConfirmation is the right target
+          // (OTP / driver tracking). Mirrors the same condition the
+          // ride-flow banner and match-result post-accept routing use.
+          final preDispatch = ride.driver.id.isEmpty;
+          return _ActiveTripSpec(
+            icon: preDispatch ? Icons.handshake_outlined : Icons.check_circle,
+            title: preDispatch ? "You're matched" : 'Ride confirmed',
+            subtitle: preDispatch
+                ? 'Tap to chat or find a cab together'
+                : 'Tap to view OTP, driver & cancel option',
+            targetRoute: preDispatch
+                ? Routes.riderCoordination
+                : Routes.rideConfirmation,
           );
       }
     }

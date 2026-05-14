@@ -8,12 +8,11 @@ import 'package:sendotp_flutter_sdk/sendotp_flutter_sdk.dart';
 import 'routes.dart';
 import 'services/ad_service.dart';
 import 'services/api/auth_api.dart';
-import 'services/api/driver_api.dart';
-import 'services/api/http_auth_api.dart';
+import 'services/api/dynamic_auth_api.dart';
 import 'services/api/http_ride_api.dart';
-import 'services/api/msg91_auth_api.dart';
 import 'services/api/ride_api.dart';
 import 'services/auth_service.dart';
+import 'services/chat_unread_service.dart';
 import 'services/location_service.dart';
 import 'services/notification_service.dart';
 import 'services/ride_flow.dart';
@@ -27,13 +26,12 @@ import 'widgets/ride_flow_banner.dart';
 import 'screens/airport_arrival_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/destination_screen.dart';
-import 'screens/driver_active_trip_screen.dart';
-import 'screens/driver_home_screen.dart';
 import 'screens/help_safety_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/luggage_screen.dart';
 import 'screens/match_preference_screen.dart';
 import 'screens/match_result_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/otp_verify_screen.dart';
 import 'screens/payment_screen.dart';
 import 'screens/phone_entry_screen.dart';
@@ -108,20 +106,16 @@ class ShareCabApp extends StatelessWidget {
     // MSG91 wiring: when widgetId + tokenAuth are configured, the OTP
     // send/verify happens client-side via the MSG91 SDK and the resulting
     // access token is exchanged at our backend's /auth/otp/msg91/verify.
-    // Refresh + logout still go through HttpAuthApi (delegated by
-    // Msg91AuthApi). Without credentials we fall back to HttpAuthApi's
-    // dev-OTP path so local demos keep working.
-    final AuthApi authApi =
-        ApiConfig.msg91Enabled ? Msg91AuthApi() : HttpAuthApi();
+    // DynamicAuthApi re-checks msg91Enabled per call (and best-effort
+    // refreshes the runtime config from the backend each request), so a
+    // late-arriving config — e.g. backend started after the app — still
+    // routes the next OTP request through the MSG91 widget instead of
+    // staying stuck on the dev-OTP HTTP path.
+    final AuthApi authApi = DynamicAuthApi();
     final authService = AuthService(authApi);
     final RideApi rideApi = HttpRideApi(
       tokenGetter: authService.accessTokenForApi,
     );
-    // DriverApi piggy-backs on the same auth session — its tokenGetter
-    // hands out the rider/driver-agnostic access token. Provided at the
-    // root so DriverHomeScreen + future driver-side screens share one
-    // instance (and therefore one underlying http.Client).
-    final driverApi = DriverApi(tokenGetter: authService.accessTokenForApi);
 
     // Navigator key + route observer power the global RideFlowBanner: the
     // banner sits above the Navigator in the widget tree (so it can overlay
@@ -134,7 +128,6 @@ class ShareCabApp extends StatelessWidget {
       providers: [
         Provider<AuthApi>.value(value: authApi),
         Provider<RideApi>.value(value: rideApi),
-        Provider<DriverApi>.value(value: driverApi),
         ChangeNotifierProvider<AuthService>.value(value: authService),
         ChangeNotifierProvider(create: (_) => LocationService(rideApi: rideApi)),
         ChangeNotifierProvider(create: (_) => RideFlowState(rideApi)),
@@ -142,6 +135,26 @@ class ShareCabApp extends StatelessWidget {
         // rider is on the RideStatusScreen. Cheap to keep around even
         // when idle — no timer runs until start() is called.
         ChangeNotifierProvider(create: (_) => TripTrackingService(rideApi)),
+        // App-lifetime unread-message counter. Watches RideFlowState
+        // for the active group and keeps one socket subscription
+        // alive there so the chat-button badge updates while the
+        // rider is on any other screen.
+        ChangeNotifierProxyProvider<RideFlowState, ChatUnreadService>(
+          // Eager: without this the service stays uninstantiated until
+          // the first widget reads it (typically the chat-button badge
+          // on coordination/confirmation), which means any chat:message
+          // broadcast BEFORE the rider lands on that screen is missed
+          // and the badge starts at 0. Eager construction makes the
+          // service listen for messages from the moment the auth
+          // session + ride flow are wired up.
+          lazy: false,
+          create: (_) => ChatUnreadService(authService),
+          update: (_, flow, service) {
+            final s = service ?? ChatUnreadService(authService);
+            s.attachFlow(flow);
+            return s;
+          },
+        ),
       ],
       child: MaterialApp(
         title: 'ShareCab',
@@ -186,9 +199,8 @@ class ShareCabApp extends StatelessWidget {
           Routes.splash: (_) => const SplashScreen(),
           Routes.phoneEntry: (_) => const PhoneEntryScreen(),
           Routes.otpVerify: (_) => const OtpVerifyScreen(),
+          Routes.onboarding: (_) => const OnboardingScreen(),
           Routes.home: (_) => const HomeScreen(),
-          Routes.driverHome: (_) => const DriverHomeScreen(),
-          Routes.driverActiveTrip: (_) => const DriverActiveTripScreen(),
           Routes.profile: (_) => const ProfileScreen(),
           Routes.helpSafety: (_) => const HelpSafetyScreen(),
           Routes.planRide: (_) => const DestinationScreen(),

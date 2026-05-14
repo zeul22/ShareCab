@@ -36,6 +36,15 @@ userSchema.methods.toPublicJSON = function toPublicJSON() {
     role: this.role,
     rating: this.rating,
     totalRides: this.totalRides,
+    // True once the rider has gone through the onboarding form. Derived,
+    // not stored: a fresh rider is created with the placeholder name
+    // 'Rider' and no email, and we treat any user with a real name + an
+    // email as having completed onboarding. The app routes incomplete
+    // users to OnboardingScreen on next login. Drivers are onboarded via
+    // a separate flow (vehicle + license), so we skip the gate for them.
+    profileCompleted:
+      this.role === 'driver' ||
+      Boolean(this.name && this.name !== 'Rider' && this.email),
   };
 };
 

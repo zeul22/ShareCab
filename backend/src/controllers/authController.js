@@ -255,7 +255,18 @@ async function verifyMsg91Otp(req, res, next) {
     const { phone, accessToken } = msg91VerifySchema.parse(req.body);
     const result = await msg91.verifyAccessToken({ accessToken });
     if (!result.ok) {
-      throw new HttpError(401, 'OTP verification failed (MSG91 rejected token)');
+      // Surface the actual MSG91 reject reason + our code-to-cause hint
+      // so the rider sees something diagnosable instead of a generic
+      // banner. The verbose log is on the backend; this is the
+      // user-facing string.
+      let detail = '';
+      if (result.message) detail += `: ${result.message}`;
+      if (result.code) detail += ` (msg91 code ${result.code})`;
+      if (result.hint) detail += ` ${result.hint}`;
+      if (!detail && result.reason === 'network') {
+        detail = ' (network error reaching MSG91)';
+      }
+      throw new HttpError(401, `OTP verification failed${detail}`);
     }
 
     let user = await User.findOne({ phone });

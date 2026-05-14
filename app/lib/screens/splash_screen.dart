@@ -30,17 +30,26 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    // Authed — pick the right home for the role. Drivers go to DriverHome
-    // and skip the rider-side restoreActiveRide flow entirely (they have
-    // their own active-dispatch surface inside DriverHome).
-    final homeRoute = Routes.homeForRole(auth.user?.role);
-    if (homeRoute == Routes.driverHome) {
-      Navigator.of(context).pushReplacementNamed(Routes.driverHome);
+    // Authed but onboarding incomplete (brand-new rider whose phone
+    // was verified but who hasn't supplied name + email yet, or an
+    // existing user pre-dating the onboarding gate). Park them on the
+    // form — restoreActiveRide can wait until they have an identity.
+    final user = auth.user;
+    if (user != null && !user.profileCompleted) {
+      Navigator.of(context).pushReplacementNamed(Routes.onboarding);
       return;
     }
 
-    // Rider path: see if there's an in-flight ride to resume. If so, push
-    // Home first (so the user has a back-stack to fall back to) and then
+    // Both rider- and driver-role users can use this app as a rider —
+    // a driver booking a cab for themselves is a perfectly normal flow
+    // and the backend's rider endpoints (POST /trips, matching, chat,
+    // ratings) only need requireAuth, not requireRole('rider'). The
+    // driver-specific surfaces (online/offline, dispatch, offers, trip
+    // lifecycle) live in the separate /driver app; this app just runs
+    // them through the rider flow.
+
+    // See if there's an in-flight ride to resume. If so, push Home
+    // first (so the user has a back-stack to fall back to) and then
     // jump forward to the active screen. If not, just land on Home.
     final flow = context.read<RideFlowState>();
     final resumeRoute = await flow.restoreActiveRide();

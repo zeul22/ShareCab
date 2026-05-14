@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/auth_session.dart';
 import '../models/user.dart';
+import '../utils/api_config.dart';
 import 'api/auth_api.dart';
 
 /// Phone + OTP auth with persistent "forever-logged-in" sessions.
@@ -123,6 +125,47 @@ class AuthService extends ChangeNotifier {
       await _clear();
       return false;
     }
+  }
+
+  /// Submit the onboarding form (also reused for later profile edits).
+  /// PATCHes /users/:id, merges the returned user into the current
+  /// session, and persists. Throws with a user-displayable message on
+  /// validation/server errors — the OnboardingScreen surfaces it under
+  /// the form.
+  Future<void> updateMyProfile({
+    required String name,
+    required String email,
+    String? homeCity,
+  }) async {
+    final s = _session;
+    if (s == null) throw StateError('Not signed in');
+    final token = await accessTokenForApi();
+    if (token == null) throw StateError('Not signed in');
+
+    final body = <String, dynamic>{'name': name, 'email': email};
+    if (homeCity != null && homeCity.isNotEmpty) body['homeCity'] = homeCity;
+
+    final res = await http.patch(
+      Uri.parse('${ApiConfig.apiRoot}/users/${s.user.id}'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode(body),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      String msg = 'Profile update failed (${res.statusCode})';
+      try {
+        final err = jsonDecode(res.body) as Map<String, dynamic>;
+        final m = err['error'] as String?;
+        if (m != null && m.isNotEmpty) msg = m;
+      } catch (_) {/* keep default */}
+      throw Exception(msg);
+    }
+    final payload = jsonDecode(res.body) as Map<String, dynamic>;
+    final updatedUser =
+        AppUser.fromJson(payload['user'] as Map<String, dynamic>);
+    await _persist(s.copyWith(user: updatedUser));
   }
 
   Future<void> logout() async {

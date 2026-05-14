@@ -62,10 +62,14 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       final auth = context.read<AuthService>();
       await auth.verifyOtp(otp);
       if (!mounted) return;
-      // Route by role so a driver lands on DriverHome instead of the rider
-      // home (and vice-versa). Single source of truth in Routes.homeForRole
-      // — splash uses the same helper.
-      final dest = Routes.homeForRole(auth.user?.role);
+      // Driver-role users land here too — a driver booking a cab for
+      // themselves is a normal flow. Drivers come back with
+      // profileCompleted=true (set during driver onboarding) so they
+      // skip the name+email form and go straight home.
+      final user = auth.user;
+      final dest = (user != null && !user.profileCompleted)
+          ? Routes.onboarding
+          : Routes.home;
       Navigator.of(context).pushNamedAndRemoveUntil(dest, (_) => false);
     } catch (e) {
       setState(() {

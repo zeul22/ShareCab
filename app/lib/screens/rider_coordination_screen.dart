@@ -7,6 +7,7 @@ import '../routes.dart';
 import '../services/api/ride_api.dart';
 import '../services/ride_flow.dart';
 import '../theme/app_theme.dart';
+import '../widgets/chat_button_badge.dart';
 
 /// Post-match coordination screen for rider-only mode (no drivers on
 /// platform yet). After accepting a match, the rider lands here instead
@@ -31,6 +32,28 @@ class RiderCoordinationScreen extends StatefulWidget {
 class _RiderCoordinationScreenState extends State<RiderCoordinationScreen> {
   bool _closing = false;
   String? _error;
+
+  Future<void> _showFindCabComingSoon() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Driver dispatch coming soon'),
+        content: const Text(
+          "We'll switch on in-app cab dispatch once ShareCab is doing 1,000+ "
+          'rides in a 90-day window — enough volume to keep drivers busy '
+          'without long idle waits. For now, coordinate with your co-rider '
+          'in chat and book a cab together on your usual app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.brandDark),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _confirmAndClose(Ride ride) async {
     final confirmed = await showDialog<bool>(
@@ -154,16 +177,33 @@ class _RiderCoordinationScreenState extends State<RiderCoordinationScreen> {
                 ),
               const SizedBox(height: 20),
               if (groupId != null && groupId.isNotEmpty)
-                _PrimaryAction(
-                  icon: Icons.chat_bubble_outline,
-                  label: 'Open chat',
-                  onPressed: _closing
-                      ? null
-                      : () => Navigator.of(context).pushNamed(
-                            Routes.chat,
-                            arguments: groupId,
-                          ),
+                ChatButtonBadge(
+                  groupId: groupId,
+                  // Inline button — push the badge into the corner so it
+                  // sits over the icon, not floating outside the button
+                  // edge like it does on AppBar IconButtons.
+                  alignment: const Alignment(0.95, -0.95),
+                  child: _PrimaryAction(
+                    icon: Icons.chat_bubble_outline,
+                    label: 'Open chat',
+                    onPressed: _closing
+                        ? null
+                        : () => Navigator.of(context).pushNamed(
+                              Routes.chat,
+                              arguments: groupId,
+                            ),
+                  ),
                 ),
+              const SizedBox(height: 10),
+              // Driver dispatch is gated until the platform has enough
+              // ride volume to make a dispatcher worth running. Until
+              // then, tapping Find a cab surfaces a "coming soon"
+              // dialog instead of pushing the gate screen.
+              _PrimaryAction(
+                icon: Icons.local_taxi_outlined,
+                label: 'Find a cab',
+                onPressed: _closing ? null : _showFindCabComingSoon,
+              ),
               const SizedBox(height: 10),
               const _SecondaryHint(
                 text: 'Phone numbers stay private — coordinate via chat.',

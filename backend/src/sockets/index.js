@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const Driver = require('../models/Driver');
 const MatchGroup = require('../models/MatchGroup');
+const User = require('../models/User');
 const notifications = require('../services/notificationService');
 const logger = require('../utils/logger');
 
@@ -20,6 +21,8 @@ const logger = require('../utils/logger');
  *   - server -> trip:    'driver:location'  { driverId, lat, lng }
  *   - server -> group:   'chat:message'     { _id, sender, content, createdAt }
  *   - server -> group:   'chat:reset'       { groupId }
+ *   - client -> server:  'chat:typing'      { groupId, state: 'start'|'stop' }
+ *   - server -> group:   'chat:typing'      { groupId, userId, name, state }
  */
 function attachSocketServer(httpServer) {
   const io = new Server(httpServer, {
@@ -75,6 +78,52 @@ function attachSocketServer(httpServer) {
     });
     socket.on('group:unsubscribe', (groupId) => {
       socket.leave(`group:${groupId}`);
+    });
+
+    // Ephemeral "user is typing" pip. Only relayed to other members of
+    // the group room — sender doesn't get an echo. We require the
+    // socket to already be a member of `group:{groupId}` (which only
+    // happens after a successful group:subscribe), so non-members
+    // can't spam typing events at a chat they aren't part of.
+    //
+    // Display name is server-resolved (not client-supplied) and cached
+    // on the socket for the rest of the connection lifetime.
+    socket.on('chat:typing', async ({ groupId, state } = {}) => {
+      if (!groupId) {
+        logger.debug(`chat:typing rejected: no groupId from user=${userId}`);
+        return;
+      }
+      const normalizedState = state === 'stop' ? 'stop' : 'start';
+      // Membership gate: the socket must be subscribed to this group's
+      // room (which only happens via a successful group:subscribe).
+      // Without this check a malicious client could spam typing pips
+      // at random groupIds they aren't a member of.
+      if (!socket.rooms.has(`group:${groupId}`)) {
+        logger.debug(
+          `chat:typing rejected: socket=${socket.id} user=${userId} ` +
+            `not in room group:${groupId}; rooms=${[...socket.rooms].join(',')}`,
+        );
+        return;
+      }
+      try {
+        if (!socket.data.userName) {
+          const u = await User.findById(userId).select('name').lean();
+          const raw = (u?.name || '').trim();
+          socket.data.userName = raw ? raw.split(' ')[0] : 'Co-rider';
+        }
+        logger.debug(
+          `chat:typing relay user=${userId} name=${socket.data.userName} ` +
+            `group=${groupId} state=${normalizedState}`,
+        );
+        socket.to(`group:${groupId}`).emit('chat:typing', {
+          groupId: String(groupId),
+          userId,
+          name: socket.data.userName,
+          state: normalizedState,
+        });
+      } catch (err) {
+        logger.debug(`chat:typing error: ${err.message}`);
+      }
     });
 
     socket.on('driver:location', async ({ lat, lng, tripId }) => {
