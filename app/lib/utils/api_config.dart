@@ -6,9 +6,10 @@ import 'package:http/http.dart' as http;
 class ApiConfig {
   // Override at build time:
   //   flutter run --dart-define=API_BASE_URL=https://api.sharecab.example
+  //   flutter run --dart-define=API_BASE_URL=http://10.0.2.2:4000
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:4000', // Android emulator -> host
+    defaultValue: 'https://sharecab-backend-bbxdisvagq-el.a.run.app',
   );
 
   static String get apiRoot => '$baseUrl/api';

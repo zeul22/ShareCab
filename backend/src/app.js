@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
 const routes = require('./routes');
+const paymentRoutes = require('./routes/payment.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
 const app = express();
@@ -16,23 +17,27 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-app.use(
-  '/api',
-  rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
-    standardHeaders: true,
-    legacyHeaders: false,
-  }),
-);
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api', apiLimiter);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'sharecab-backend', time: new Date().toISOString() });
 });
+
+// Razorpay verifies webhooks against the exact raw request body, so this route
+// must be mounted before the global JSON/urlencoded parsers.
+app.use('/api/payments', paymentRoutes);
+
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 app.use('/api', routes);
 

@@ -67,7 +67,7 @@ website/
 
 ## Connecting to the backend
 
-The marketing site is largely static. If/when you wire interactive forms (e.g. waitlist, contact), point them at `NEXT_PUBLIC_API_BASE` from `.env.local`.
+The marketing site is largely static. If/when you wire interactive forms (e.g. waitlist, contact), point them at `NEXT_PUBLIC_API_BASE_URL` from `.env.local`.
 
 ## License
 

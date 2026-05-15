@@ -10,6 +10,9 @@ const fallbackSiteUrl = 'http://localhost:3000';
 export const env = {
   siteName: process.env.NEXT_PUBLIC_SITE_NAME ?? 'ShareCab',
   siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? fallbackSiteUrl,
+  apiBaseUrl:
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    'https://sharecab-backend-bbxdisvagq-el.a.run.app',
 
   appStoreUrl: process.env.NEXT_PUBLIC_APP_STORE_URL ?? '',
   playStoreUrl: process.env.NEXT_PUBLIC_PLAY_STORE_URL ?? '',
