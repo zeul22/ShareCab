@@ -61,8 +61,9 @@ async function verifyAccessToken({ accessToken }) {
     //   code 418 → auth-key OK, but the access-token failed verification.
     //              Causes: token expired, widget mints with a different
     //              account's JWT secret than this auth-key, widget lacks
-    //              Mobile Integration / JWT mode, or the wrong field was
-    //              extracted from the SDK response.
+    //              Mobile Integration / JWT mode, the wrong field was
+    //              extracted from the SDK response, or MSG91 API Security
+    //              rejected Cloud Run's non-whitelisted outbound IP.
     let hint = '';
     if (body?.code === '201') {
       hint = ' [MSG91_AUTH_KEY appears invalid — re-check the account-level '
@@ -70,7 +71,9 @@ async function verifyAccessToken({ accessToken }) {
     } else if (body?.code === '418') {
       hint = ' [auth-key accepted by MSG91, access-token rejected — '
         + 'check widget JWT/Mobile Integration is enabled AND that the '
-        + 'configured widget belongs to the same MSG91 account as MSG91_AUTH_KEY]';
+        + 'configured widget belongs to the same MSG91 account as MSG91_AUTH_KEY. '
+        + 'Also check MSG91 API Security/IP whitelist: Cloud Run outbound IPs '
+        + 'are not static unless you configure Serverless VPC + Cloud NAT]';
     }
     logger.warn(
       `MSG91 verify rejected: status=${res.status} code=${body?.code || '?'} type=${body?.type || 'unknown'} ` +

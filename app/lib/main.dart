@@ -69,6 +69,7 @@ Future<void> main() async {
   // Print which auth path is engaged so a silent fallback to dev-OTP
   // is impossible to miss while debugging.
   debugPrint('[auth] ${ApiConfig.msg91DiagnosticSummary}');
+  debugPrint('[msg91] ${ApiConfig.msg91DiagnosticDetails}');
   runApp(const ShareCabApp());
 }
 

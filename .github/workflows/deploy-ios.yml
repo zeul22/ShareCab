@@ -102,6 +102,18 @@ jobs:
           echo "API_BASE_URL=$resolved" >> "$GITHUB_ENV"
           echo "Using API backend: $resolved"
 
+      - name: Validate MSG91 widget config
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${MSG91_WIDGET_ID:-}" || -z "${MSG91_WIDGET_AUTH_TOKEN:-}" ]]; then
+            echo "MSG91 widget dart-defines are required for TestFlight builds."
+            echo "Set MSG91_WIDGET_ID as an environment variable and MSG91_WIDGET_AUTH_TOKEN as an environment secret in GitHub environment: mobile-deploy."
+            exit 1
+          fi
+
+          echo "MSG91 widget config is present."
+
       - name: Prepare App Store Connect API key file
         run: |
           set -euo pipefail
@@ -276,12 +288,42 @@ jobs:
           done
 
           compiled_api_base="$(grep '^API_BASE_URL=' "$decoded_defines" | tail -n 1 | cut -d= -f2- || true)"
+          compiled_msg91_widget_id="$(grep '^MSG91_WIDGET_ID=' "$decoded_defines" | tail -n 1 | cut -d= -f2- || true)"
+          compiled_msg91_auth_token="$(grep '^MSG91_WIDGET_AUTH_TOKEN=' "$decoded_defines" | tail -n 1 | cut -d= -f2- || true)"
           echo "Compiled API_BASE_URL=$compiled_api_base"
+
+          mask_value() {
+            local value="$1"
+            if [[ -z "$value" ]]; then
+              printf 'missing'
+            elif (( ${#value} <= 8 )); then
+              printf 'present(len=%s)' "${#value}"
+            else
+              printf '%s...%s(len=%s)' "${value:0:4}" "${value: -4}" "${#value}"
+            fi
+          }
+
+          token_state() {
+            local value="$1"
+            if [[ -z "$value" ]]; then
+              printf 'missing'
+            else
+              printf 'present(len=%s)' "${#value}"
+            fi
+          }
+
+          echo "Compiled MSG91_WIDGET_ID=$(mask_value "$compiled_msg91_widget_id")"
+          echo "Compiled MSG91_WIDGET_AUTH_TOKEN=$(token_state "$compiled_msg91_auth_token")"
 
           if [[ "$compiled_api_base" != "$API_BASE_URL" ]]; then
             echo "Compiled API_BASE_URL does not match workflow API_BASE_URL."
             echo "Expected: $API_BASE_URL"
             echo "Actual:   $compiled_api_base"
+            exit 1
+          fi
+
+          if [[ -z "$compiled_msg91_widget_id" || -z "$compiled_msg91_auth_token" ]]; then
+            echo "Compiled MSG91 widget config is missing."
             exit 1
           fi
 

@@ -43,6 +43,30 @@ class ApiConfig {
   static String _runtimeMsg91AuthToken = '';
   static bool _runtimeMsg91ConfigLoaded = false;
 
+  static String _maskValue(String value) {
+    if (value.isEmpty) return 'missing';
+    if (value.length <= 8) return 'present(len=${value.length})';
+    return '${value.substring(0, 4)}...${value.substring(value.length - 4)}'
+        '(len=${value.length})';
+  }
+
+  static String _tokenState(String value) =>
+      value.isEmpty ? 'missing' : 'present(len=${value.length})';
+
+  static String get _widgetIdSource {
+    if (_msg91WidgetIdFromDefine.isNotEmpty) return 'dart-define';
+    if (_runtimeMsg91WidgetId.isNotEmpty) return 'backend config';
+    return 'missing';
+  }
+
+  static String get _authTokenSource {
+    if (_msg91WidgetAuthToken.isNotEmpty) return 'MSG91_WIDGET_AUTH_TOKEN';
+    if (_msg91AuthToken.isNotEmpty) return 'MSG91_AUTH_TOKEN';
+    if (_msg91TokenAuthLegacy.isNotEmpty) return 'MSG91_TOKEN_AUTH';
+    if (_runtimeMsg91AuthToken.isNotEmpty) return 'backend config';
+    return 'missing';
+  }
+
   static String get msg91WidgetId => _msg91WidgetIdFromDefine.isNotEmpty
       ? _msg91WidgetIdFromDefine
       : _runtimeMsg91WidgetId;
@@ -66,7 +90,11 @@ class ApiConfig {
 
     final c = client ?? http.Client();
     try {
+      debugPrint('[msg91] fetching runtime widget config from '
+          '$apiRoot/auth/otp/msg91/config');
       final res = await c.get(Uri.parse('$apiRoot/auth/otp/msg91/config'));
+      debugPrint('[msg91] runtime config response status=${res.statusCode} '
+          'bodyBytes=${res.bodyBytes.length}');
       if (res.statusCode < 200 || res.statusCode >= 300 || res.body.isEmpty) {
         // Transient failure — don't latch _runtimeMsg91ConfigLoaded, so
         // the next OTP request retries.
@@ -74,6 +102,7 @@ class ApiConfig {
       }
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       if (body['enabled'] != true) {
+        debugPrint('[msg91] runtime config disabled by backend');
         // Backend confirmed MSG91 is off (dev fallback or missing
         // creds). Latch the flag so we don't hammer the endpoint on
         // every keystroke.
@@ -86,6 +115,9 @@ class ApiConfig {
         _runtimeMsg91WidgetId = widgetId;
         _runtimeMsg91AuthToken = authToken;
         _runtimeMsg91ConfigLoaded = true;
+        debugPrint('[msg91] runtime config loaded: '
+            'widgetId=${_maskValue(widgetId)}, '
+            'authToken=${_tokenState(authToken)}');
       }
     } catch (e) {
       debugPrint('[auth] MSG91 runtime config fetch failed: $e');
@@ -127,6 +159,17 @@ class ApiConfig {
     }
     return 'MSG91 OTP disabled — falling back to dev-OTP path. '
         'Missing widget config: ${missing.join(', ')}';
+  }
+
+  static String get msg91DiagnosticDetails {
+    return 'MSG91 config details: '
+        'enabled=$msg91Enabled, '
+        'apiRoot=$apiRoot, '
+        'widgetId=${_maskValue(msg91WidgetId)}, '
+        'widgetIdSource=$_widgetIdSource, '
+        'authToken=${_tokenState(msg91TokenAuth)}, '
+        'authTokenSource=$_authTokenSource, '
+        'runtimeConfigLoaded=$_runtimeMsg91ConfigLoaded';
   }
 
   // AdMob rewarded video ad unit. Defaults to AdMob's OFFICIAL test
