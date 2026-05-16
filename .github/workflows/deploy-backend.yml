@@ -1,0 +1,177 @@
+name: Deploy Backend
+
+# Manual-only while we're in testing mode. Re-add a `push:` trigger
+# (e.g. on the `preprod` branch with a `paths:` filter on `backend/**`)
+# once the flow is verified end-to-end.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required only if you switch to Workload Identity Federation (auth
+  # action with `workload_identity_provider:`). Harmless for the JSON
+  # key path used below.
+  id-token: write
+
+jobs:
+  # --- Stage 1: run the backend's own checks before any image build. ---
+  # If lint/tests fail there is no value in pushing a broken image to
+  # Artifact Registry or rolling out a bad revision to Cloud Run.
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ vars.NODE_VERSION || '20' }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+  # --- Stage 2: build container, push to Artifact Registry, roll out. ---
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: backend-deploy
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    env:
+      # All of these are overridable via the `backend-deploy` GitHub
+      # environment's "Variables" tab. Defaults match the values
+      # already in use for the existing Cloud Run service.
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'asia-south1' }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'sharecab-backend' }}
+      ARTIFACT_REGISTRY_REPO: ${{ vars.ARTIFACT_REGISTRY_REPO || 'sharecab' }}
+      # Min instances = 0 keeps the free-tier bill at zero on idle. The
+      # first request after a cold start will eat a Mongo Atlas
+      # handshake + Express boot (~1-2s). Override to 1 if you want
+      # warm capacity in production.
+      MIN_INSTANCES: ${{ vars.CLOUD_RUN_MIN_INSTANCES || '0' }}
+      MAX_INSTANCES: ${{ vars.CLOUD_RUN_MAX_INSTANCES || '4' }}
+
+    steps:
+      - name: Enforce preprod branch
+        if: github.ref != 'refs/heads/preprod' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "This workflow is restricted to the preprod branch."
+          exit 1
+
+      - name: Validate required configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "$GCP_PROJECT_ID" ]]; then
+            echo "vars.GCP_PROJECT_ID is required (set it on the backend-deploy environment)."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Resolve image URI
+        run: |
+          set -euo pipefail
+          # Two tags per build:
+          #   - the immutable commit SHA (what we actually deploy)
+          #   - `latest` for ad-hoc pulls / rollback inspection
+          BASE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}/${CLOUD_RUN_SERVICE}"
+          {
+            echo "IMAGE_URI=${BASE}:${GITHUB_SHA}"
+            echo "IMAGE_URI_LATEST=${BASE}:latest"
+          } >> "$GITHUB_ENV"
+
+      - name: Build container image
+        run: |
+          set -euo pipefail
+          docker build \
+            --tag "$IMAGE_URI" \
+            --tag "$IMAGE_URI_LATEST" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            .
+
+      - name: Push container image
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE_URI"
+          docker push "$IMAGE_URI_LATEST"
+
+      - name: Deploy to Cloud Run
+        run: |
+          set -euo pipefail
+          # NOTE: we intentionally do NOT pass --set-env-vars here.
+          # gcloud run deploy --image preserves the service's existing
+          # env config, so secrets like JWT_SECRET / MSG91_AUTH_KEY /
+          # MONGODB_URI / RAZORPAY_* that are configured once on the
+          # Cloud Run service stay intact across deploys. Manage them
+          # via Secret Manager + `gcloud run services update
+          # --update-secrets=...` or the Cloud Run console; this
+          # workflow just ships new code.
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --image "$IMAGE_URI" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --min-instances "$MIN_INSTANCES" \
+            --max-instances "$MAX_INSTANCES" \
+            --quiet
+
+      - name: Smoke-test the deployed revision
+        run: |
+          set -euo pipefail
+          URL=$(gcloud run services describe "$CLOUD_RUN_SERVICE" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(status.url)')
+          echo "Service URL: $URL"
+
+          # Up to ~30s warm-up tolerance (cold start + first Mongo
+          # handshake). Fail loudly if /health never returns 200 so a
+          # broken rollout doesn't quietly stay green.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 10 "$URL/health" -o /tmp/health.json; then
+              echo "Health check OK (attempt $attempt):"
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "Health check failed (attempt $attempt), retrying in 5s…"
+            sleep 5
+          done
+
+          echo "Service /health did not return 200 within 30s after deploy."
+          exit 1

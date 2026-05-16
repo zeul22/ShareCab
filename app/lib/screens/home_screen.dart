@@ -15,7 +15,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   GoogleMapController? _map;
 
   // City-center fallback while we wait for the user's GPS fix.
@@ -25,20 +25,50 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final loc = await context.read<LocationService>().fetchCurrent();
-      if (loc != null && _map != null) {
-        await _map!.animateCamera(
-          CameraUpdate.newLatLngZoom(LatLng(loc.lat, loc.lng), 15),
-        );
-      }
-    });
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refresh());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _map?.dispose();
     super.dispose();
+  }
+
+  /// Triggers a location re-fetch when the rider returns to the app from
+  /// the background. GPS coords go stale fast — if the rider closed the
+  /// app at home and reopened it at a cafe, we want the pickup pin (and
+  /// the bottom sheet's "Detecting your location…" line) to reflect
+  /// where they actually are *now*, not where they were last session.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _refresh();
+    }
+  }
+
+  /// Pulls fresh GPS + any in-flight ride state from the backend and
+  /// recenters the map. Shared between initState's first paint, the
+  /// background→foreground resume path, and the pull-to-refresh
+  /// gesture on the bottom sheet.
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    final locService = context.read<LocationService>();
+    final flow = context.read<RideFlowState>();
+    // Run in parallel — the active-ride poll doesn't need to wait for
+    // GPS and vice versa. We keep their typed futures separate so each
+    // result is statically typed at the await site.
+    final locFuture = locService.fetchCurrent();
+    final rideFuture = flow.restoreActiveRide();
+    final loc = await locFuture;
+    await rideFuture;
+    if (!mounted) return;
+    if (loc != null && _map != null) {
+      await _map!.animateCamera(
+        CameraUpdate.newLatLngZoom(LatLng(loc.lat, loc.lng), 15),
+      );
+    }
   }
 
   void _startStandardFlow() {

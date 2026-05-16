@@ -1,12 +1,9 @@
 name: Deploy iOS
 
+# Manual-only while we're in testing mode. Re-add a `push:` trigger
+# (e.g. on the `preprod` branch with a `paths:` filter on `app/**`)
+# once the flow is verified end-to-end.
 on:
-  push:
-    branches:
-      - preprod
-    paths:
-      - "app/**"
-      - ".github/workflows/deploy-ios.yml"
   workflow_dispatch:
 
 permissions:
@@ -29,6 +26,7 @@ jobs:
       IOS_EXPORT_METHOD: ${{ vars.IOS_EXPORT_METHOD || 'app-store' }}
       IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID || 'JZVW649NG3' }}
       API_BASE_URL: ${{ vars.API_BASE_URL || 'https://sharecab-backend-bbxdisvagq-el.a.run.app' }}
+      PRODUCTION_API_BASE_URL: https://sharecab-backend-bbxdisvagq-el.a.run.app
       GOOGLE_MAPS_KEY: ${{ secrets.GOOGLE_MAPS_KEY || vars.GOOGLE_MAPS_KEY }}
       MSG91_WIDGET_ID: ${{ vars.MSG91_WIDGET_ID }}
       MSG91_WIDGET_AUTH_TOKEN: ${{ secrets.MSG91_WIDGET_AUTH_TOKEN || secrets.SENDOTP_AUTH_TOKEN }}
@@ -45,7 +43,11 @@ jobs:
 
     steps:
       - name: Enforce preprod branch
-        if: github.ref != 'refs/heads/preprod'
+        # Skipped on manual dispatches so we can test the workflow
+        # from feature branches. Re-tighten by removing the
+        # `workflow_dispatch` clause once we re-enable the `push:`
+        # trigger.
+        if: github.ref != 'refs/heads/preprod' && github.event_name != 'workflow_dispatch'
         run: |
           echo "This workflow is restricted to the preprod branch."
           exit 1
@@ -81,6 +83,38 @@ jobs:
 
       - name: Install Flutter dependencies
         run: flutter pub get
+
+      - name: Resolve production API base URL
+        run: |
+          set -euo pipefail
+
+          resolved="${API_BASE_URL:-}"
+          case "$resolved" in
+            ""|http://localhost:*|https://localhost:*|http://127.0.0.1:*|https://127.0.0.1:*|http://10.0.2.2:*|https://10.0.2.2:*)
+              echo "API_BASE_URL was empty or local-only ($resolved); using Cloud Run backend."
+              resolved="$PRODUCTION_API_BASE_URL"
+              ;;
+          esac
+
+          if [[ "$resolved" != https://* ]]; then
+            echo "API_BASE_URL must be an HTTPS URL for TestFlight builds: $resolved"
+            exit 1
+          fi
+
+          echo "API_BASE_URL=$resolved" >> "$GITHUB_ENV"
+          echo "Using API backend: $resolved"
+
+      - name: Resolve iOS build number
+        run: |
+          set -euo pipefail
+
+          # App Store Connect requires CFBundleVersion to increase on every
+          # upload. A timestamp keeps manual reruns and workflow reruns unique.
+          attempt="$(printf '%02d' "${GITHUB_RUN_ATTEMPT:-1}")"
+          build_number="$(date -u +%y%m%d%H%M%S)${attempt}"
+
+          echo "IOS_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "Using iOS build number: $build_number"
 
       - name: Install iOS signing assets
         run: |
@@ -187,7 +221,7 @@ jobs:
             build ipa
             -t "$IOS_TARGET"
             --export-method "$IOS_EXPORT_METHOD"
-            --build-number "$GITHUB_RUN_NUMBER"
+            --build-number "$IOS_BUILD_NUMBER"
             --dart-define="API_BASE_URL=$API_BASE_URL"
           )
 
@@ -209,6 +243,50 @@ jobs:
           fi
 
           flutter "${FLUTTER_ARGS[@]}"
+
+      - name: Verify iOS dart-defines
+        run: |
+          set -euo pipefail
+
+          GENERATED_XCCONFIG="$PWD/ios/Flutter/Generated.xcconfig"
+          if [[ ! -f "$GENERATED_XCCONFIG" ]]; then
+            echo "Generated.xcconfig missing after Flutter build."
+            exit 1
+          fi
+
+          DART_DEFINES_LINE="$(grep '^DART_DEFINES=' "$GENERATED_XCCONFIG" | cut -d= -f2- || true)"
+          if [[ -z "$DART_DEFINES_LINE" ]]; then
+            echo "DART_DEFINES missing from $GENERATED_XCCONFIG"
+            exit 1
+          fi
+
+          decoded_defines="$RUNNER_TEMP/dart-defines.txt"
+          : > "$decoded_defines"
+          IFS=',' read -ra encoded_items <<< "$DART_DEFINES_LINE"
+          for encoded in "${encoded_items[@]}"; do
+            if [[ -n "$encoded" ]]; then
+              printf '%s' "$encoded" | base64 --decode >> "$decoded_defines" 2>/dev/null || \
+                printf '%s' "$encoded" | base64 -D >> "$decoded_defines"
+              printf '\n' >> "$decoded_defines"
+            fi
+          done
+
+          compiled_api_base="$(grep '^API_BASE_URL=' "$decoded_defines" | tail -n 1 | cut -d= -f2- || true)"
+          echo "Compiled API_BASE_URL=$compiled_api_base"
+
+          if [[ "$compiled_api_base" != "$API_BASE_URL" ]]; then
+            echo "Compiled API_BASE_URL does not match workflow API_BASE_URL."
+            echo "Expected: $API_BASE_URL"
+            echo "Actual:   $compiled_api_base"
+            exit 1
+          fi
+
+          case "$compiled_api_base" in
+            http://localhost:*|https://localhost:*|http://127.0.0.1:*|https://127.0.0.1:*|http://10.0.2.2:*|https://10.0.2.2:*)
+              echo "Refusing to upload TestFlight build compiled with local API URL: $compiled_api_base"
+              exit 1
+              ;;
+          esac
 
       - name: Export IPA from xcarchive
         run: |

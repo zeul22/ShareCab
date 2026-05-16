@@ -169,7 +169,7 @@
       "flutterMode": "debug",
       "deviceId": "iPhone 16e (Rider A)",
       "toolArgs": [
-        "--dart-define=API_BASE_URL=http://localhost:4000",
+        "--dart-define=API_BASE_URL=https://sharecab-backend-bbxdisvagq-el.a.run.app",
         "--dart-define=GOOGLE_MAPS_KEY=AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk"
       ]
     },
@@ -182,7 +182,7 @@
       "flutterMode": "debug",
       "deviceId": "iPhone 16e (Rider B)",
       "toolArgs": [
-        "--dart-define=API_BASE_URL=http://localhost:4000",
+        "--dart-define=API_BASE_URL=https://sharecab-backend-bbxdisvagq-el.a.run.app",
         "--dart-define=GOOGLE_MAPS_KEY=AIzaSyBWOhx-MTodQ3_mgUgi9ZTPK0ths1XaSNk"
       ]
     },
