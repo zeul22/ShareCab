@@ -58,6 +58,10 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   }
 
   Future<void> _send() async {
+    // Drop the keyboard the moment the user commits to sending — iOS's
+    // phone numpad has no return key, so without this it'd hover over
+    // the "Send OTP" button while the request is in flight.
+    FocusScope.of(context).unfocus();
     final e164 = _composeE164();
     // Cheapest possible validation — MSG91 + zod on the backend do the
     // real check. We just block obviously-empty / 1-2 digit submits so
@@ -97,11 +101,23 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
+      // Tap anywhere outside the phone field to drop the keyboard. iOS's
+      // phone numpad has no return key, so without this the user has no
+      // way to dismiss it short of submitting. HitTestBehavior.opaque
+      // means empty regions (the headline, demo panel, gaps between
+      // widgets) still register taps.
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SafeArea(
+          bottom: false,
+          child: SingleChildScrollView(
+            // Dragging the scroll view also dismisses the keyboard — a
+            // gesture iOS users expect since it's the system-wide
+            // pattern for forms that don't have a return key.
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 24),
@@ -173,6 +189,7 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
               ),
               const SizedBox(height: 24),
             ],
+            ),
           ),
         ),
       ),
