@@ -1,15 +1,45 @@
 default_platform(:ios)
 
+def sharecab_app_store_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("APP_STORE_CONNECT_KEY_ID"),
+    issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+    key_filepath: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"),
+    duration: 1200,
+    in_house: false
+  )
+end
+
 platform :ios do
+  desc "Resolve the next ShareCab rider TestFlight build number"
+  lane :next_build_number do
+    latest = latest_testflight_build_number(
+      api_key: sharecab_app_store_api_key,
+      app_identifier: ENV.fetch("IOS_BUNDLE_ID"),
+      platform: "ios",
+      initial_build_number: 0
+    ).to_i
+
+    next_build_number = latest + 1
+
+    if ENV["GITHUB_RUN_NUMBER"]
+      workflow_build_number = (ENV["GITHUB_RUN_NUMBER"].to_i * 100) + ENV.fetch("GITHUB_RUN_ATTEMPT", "1").to_i
+      next_build_number = [next_build_number, workflow_build_number].max
+    end
+
+    if ENV["GITHUB_ENV"]
+      File.open(ENV.fetch("GITHUB_ENV"), "a") do |file|
+        file.puts("IOS_BUILD_NUMBER=#{next_build_number}")
+      end
+    end
+
+    UI.message("Using iOS build number: #{next_build_number}")
+    next_build_number
+  end
+
   desc "Upload the built ShareCab rider IPA to TestFlight"
   lane :beta do
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("APP_STORE_CONNECT_KEY_ID"),
-      issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
-      key_filepath: ENV.fetch("APP_STORE_CONNECT_KEY_PATH"),
-      duration: 1200,
-      in_house: false
-    )
+    api_key = sharecab_app_store_api_key
 
     upload_to_testflight(
       api_key: api_key,

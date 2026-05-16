@@ -104,17 +104,21 @@ jobs:
           echo "API_BASE_URL=$resolved" >> "$GITHUB_ENV"
           echo "Using API backend: $resolved"
 
-      - name: Resolve iOS build number
+      - name: Prepare App Store Connect API key file
         run: |
           set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/app-store-connect-key.p8"
+          KEY_CONTENT="$APP_STORE_CONNECT_PRIVATE_KEY"
+          KEY_CONTENT="${KEY_CONTENT//\\n/$'\n'}"
+          KEY_CONTENT="${KEY_CONTENT//$'\r'/}"
+          if [[ "$KEY_CONTENT" == \"*\" && "$KEY_CONTENT" == *\" ]]; then
+            KEY_CONTENT="${KEY_CONTENT:1:${#KEY_CONTENT}-2}"
+          fi
+          printf '%s\n' "$KEY_CONTENT" > "$KEY_PATH"
+          echo "APP_STORE_CONNECT_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
-          # App Store Connect requires CFBundleVersion to increase on every
-          # upload. A timestamp keeps manual reruns and workflow reruns unique.
-          attempt="$(printf '%02d' "${GITHUB_RUN_ATTEMPT:-1}")"
-          build_number="$(date -u +%y%m%d%H%M%S)${attempt}"
-
-          echo "IOS_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
-          echo "Using iOS build number: $build_number"
+      - name: Resolve iOS build number
+        run: bundle exec fastlane ios next_build_number
 
       - name: Install iOS signing assets
         run: |
@@ -216,6 +220,8 @@ jobs:
       - name: Build signed IPA
         run: |
           set -euo pipefail
+
+          rm -rf build/ios/archive build/ios/ipa
 
           FLUTTER_ARGS=(
             build ipa
@@ -346,6 +352,40 @@ jobs:
             fi
             exit 1
           fi
+
+          IPA_INSPECT_DIR="$RUNNER_TEMP/ipa-inspect"
+          rm -rf "$IPA_INSPECT_DIR"
+          mkdir -p "$IPA_INSPECT_DIR"
+          ditto -x -k "$IPA_PATH" "$IPA_INSPECT_DIR"
+
+          APP_INFO_PLIST="$(find "$IPA_INSPECT_DIR/Payload" -maxdepth 3 -path '*.app/Info.plist' | head -n 1 || true)"
+          if [[ -z "$APP_INFO_PLIST" ]]; then
+            echo "Could not find app Info.plist inside IPA: $IPA_PATH"
+            exit 1
+          fi
+
+          IPA_BUNDLE_VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP_INFO_PLIST")
+          IPA_SHORT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP_INFO_PLIST")
+          IPA_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP_INFO_PLIST")
+
+          echo "IPA bundle id: $IPA_BUNDLE_ID"
+          echo "IPA version: $IPA_SHORT_VERSION"
+          echo "IPA build number: $IPA_BUNDLE_VERSION"
+
+          if [[ "$IPA_BUNDLE_ID" != "$IOS_BUNDLE_ID" ]]; then
+            echo "IPA bundle id does not match expected bundle id."
+            echo "Expected: $IOS_BUNDLE_ID"
+            echo "Actual:   $IPA_BUNDLE_ID"
+            exit 1
+          fi
+
+          if [[ "$IPA_BUNDLE_VERSION" != "$IOS_BUILD_NUMBER" ]]; then
+            echo "IPA build number does not match generated IOS_BUILD_NUMBER."
+            echo "Expected: $IOS_BUILD_NUMBER"
+            echo "Actual:   $IPA_BUNDLE_VERSION"
+            exit 1
+          fi
+
           echo "IOS_IPA_PATH=$IPA_PATH" >> "$GITHUB_ENV"
 
       - name: Upload IPA artifact
@@ -354,19 +394,6 @@ jobs:
           name: sharecab-ios-ipa
           path: app/build/ios/ipa/*.ipa
           if-no-files-found: error
-
-      - name: Prepare App Store Connect API key file
-        run: |
-          set -euo pipefail
-          KEY_PATH="$RUNNER_TEMP/app-store-connect-key.p8"
-          KEY_CONTENT="$APP_STORE_CONNECT_PRIVATE_KEY"
-          KEY_CONTENT="${KEY_CONTENT//\\n/$'\n'}"
-          KEY_CONTENT="${KEY_CONTENT//$'\r'/}"
-          if [[ "$KEY_CONTENT" == \"*\" && "$KEY_CONTENT" == *\" ]]; then
-            KEY_CONTENT="${KEY_CONTENT:1:${#KEY_CONTENT}-2}"
-          fi
-          printf '%s\n' "$KEY_CONTENT" > "$KEY_PATH"
-          echo "APP_STORE_CONNECT_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Upload to TestFlight
         run: bundle exec fastlane ios beta
