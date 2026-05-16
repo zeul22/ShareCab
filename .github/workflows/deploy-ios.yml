@@ -1,10 +1,12 @@
 name: Deploy iOS
 
-# Manual-only while we're in testing mode. Re-add a `push:` trigger
-# (e.g. on the `preprod` branch with a `paths:` filter on `app/**`)
-# once the flow is verified end-to-end.
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - preprod
+    paths:
+      - "app/**"
+      - ".github/workflows/deploy-ios.yml"
 
 permissions:
   contents: read
@@ -43,11 +45,7 @@ jobs:
 
     steps:
       - name: Enforce preprod branch
-        # Skipped on manual dispatches so we can test the workflow
-        # from feature branches. Re-tighten by removing the
-        # `workflow_dispatch` clause once we re-enable the `push:`
-        # trigger.
-        if: github.ref != 'refs/heads/preprod' && github.event_name != 'workflow_dispatch'
+        if: github.ref != 'refs/heads/preprod'
         run: |
           echo "This workflow is restricted to the preprod branch."
           exit 1
